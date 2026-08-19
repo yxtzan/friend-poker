@@ -30,6 +30,8 @@ import {
   persistentFixtureFactory,
 } from "./persistence-helpers.js";
 import type { PersistentFixtureFactory } from "./persistence-helpers.js";
+import type { PersistentFixtureStartOptions } from "./persistence-helpers.js";
+import { FakeLifecycleScheduler } from "./fake-lifecycle-scheduler.js";
 
 let temporaryRoot: string;
 let fixture: TransportFixture | undefined;
@@ -52,9 +54,9 @@ function projection(): SafeTableProjection {
   return fixture!.server.runtime.getProjection({ kind: "SPECTATOR" });
 }
 
-async function restart(): Promise<void> {
+async function restart(options: PersistentFixtureStartOptions = {}): Promise<void> {
   await fixture!.close();
-  fixture = await factory.start();
+  fixture = await factory.start(options);
 }
 
 async function createSeatedPlayers(count = 2): Promise<ConnectedClient[]> {
@@ -139,12 +141,16 @@ describe("durable checkpoint recovery", () => {
       expect(active.status).toBe("APPLIED");
     }
     expect(active.projection.currentHand).not.toBeNull();
+    const highestActionVersion = active.version;
+    const lastPreRestartVersion = projection().version;
 
     const cookies = clients.map((client) => client.cookie);
     const playerIds = clients.map((client) => client.identity.playerId);
     await restart();
 
     const recovered = projection();
+    expect(lastPreRestartVersion).toBeGreaterThanOrEqual(highestActionVersion);
+    expect(recovered.version).toBeGreaterThan(lastPreRestartVersion);
     expect(recovered.status).toBe(TableLifecycleStatus.WaitingForFirstHand);
     expect(recovered.currentHand).toBeNull();
     expect(recovered.recentHands).toHaveLength(0);
@@ -330,6 +336,109 @@ describe("durable checkpoint recovery", () => {
     ).toBe(false);
     expect(twentyFirstSession.recentSessions.at(-1)?.sessionId).toBe("session-retention-20");
   }, 120_000);
+});
+
+describe("recovered lifecycle initialization", () => {
+  it("starts a fresh all-offline window before any client reconnects", async () => {
+    const clients = await createSeatedPlayers();
+    await startSession(clients, "startup-offline");
+    const clock = new FakeLifecycleScheduler();
+    await restart({ lifecycleScheduler: clock });
+
+    const recovered = projection();
+    const recoveredPlayers = [
+      ...recovered.seats.filter((player) => player !== null),
+      ...recovered.spectators,
+    ];
+    expect(recoveredPlayers.every((player) => !player.online)).toBe(true);
+    expect(recovered.status).toBe(TableLifecycleStatus.WaitingForFirstHand);
+
+    clock.advanceBy(30 * 60_000 - 1);
+    await fixture!.server.settleLifecycle();
+    expect(projection().status).toBe(TableLifecycleStatus.WaitingForFirstHand);
+
+    clock.advanceBy(1);
+    await fixture!.server.settleLifecycle();
+    expect(projection().status).toBe(TableLifecycleStatus.SessionEnded);
+  });
+
+  it("starts offline-host grace and clears the host at 60 seconds without a candidate", async () => {
+    const clients = await createSeatedPlayers();
+    await startSession(clients, "startup-host");
+    const hostId = clients[0]!.identity.playerId;
+    const clock = new FakeLifecycleScheduler();
+    await restart({ lifecycleScheduler: clock });
+
+    expect(projection().hostPlayerId).toBe(hostId);
+    clock.advanceBy(60_000 - 1);
+    await fixture!.server.settleLifecycle();
+    expect(projection().hostPlayerId).toBe(hostId);
+
+    clock.advanceBy(1);
+    await fixture!.server.settleLifecycle();
+    expect(projection().hostPlayerId).toBeNull();
+  });
+
+  it("elects a player who reconnects before recovered host grace expires", async () => {
+    const clients = await createSeatedPlayers();
+    await startSession(clients, "startup-host-candidate");
+    const oldHostId = clients[0]!.identity.playerId;
+    const candidate = clients[1]!;
+    const clock = new FakeLifecycleScheduler();
+    await restart({ lifecycleScheduler: clock });
+
+    clock.advanceBy(30_000);
+    await fixture!.server.settleLifecycle();
+    const reconnected = await connectWithCookie(fixture!, candidate.cookie);
+    expect(findPublicPlayer(reconnected.initialProjection, candidate.identity.playerId)?.online).toBe(
+      true,
+    );
+    expect(projection().hostPlayerId).toBe(oldHostId);
+
+    clock.advanceBy(30_000);
+    await fixture!.server.settleLifecycle();
+    expect(projection().hostPlayerId).toBe(candidate.identity.playerId);
+    expect(projection().status).toBe(TableLifecycleStatus.WaitingForFirstHand);
+  });
+});
+
+describe("runtime version high-water recovery", () => {
+  it("advances beyond repeated connection versions and rejects an old expectedVersion", async () => {
+    const [host, player] = await createSeatedPlayers();
+    await startSession([host!, player!], "connection-version");
+
+    const firstOffline = waitForProjection(
+      host!.socket,
+      (state) => findPublicPlayer(state, player!.identity.playerId)?.online === false,
+    );
+    player!.socket.disconnect();
+    await firstOffline;
+    const reconnected = await connectWithCookie(fixture!, player!.cookie);
+    const secondOffline = waitForProjection(
+      host!.socket,
+      (state) =>
+        state.version > reconnected.initialProjection.version &&
+        findPublicPlayer(state, player!.identity.playerId)?.online === false,
+    );
+    reconnected.socket.disconnect();
+    const lastExposed = await secondOffline;
+
+    const lastPreRestartVersion = projection().version;
+    await restart();
+    expect(lastPreRestartVersion).toBeGreaterThanOrEqual(lastExposed.version);
+    expect(projection().version).toBeGreaterThan(lastPreRestartVersion);
+    const restoredHost = await connectWithCookie(fixture!, host!.cookie);
+    const stale = await executeSocketCommand(restoredHost.socket, {
+      commandId: "old-version-after-restart",
+      expectedVersion: lastExposed.version,
+      command: {
+        type: RuntimeCommandType.ChangeBlinds,
+        smallBlind: 2,
+        bigBlind: 4,
+      },
+    });
+    expect(stale).toMatchObject({ status: "REJECTED", reason: "STALE_VERSION" });
+  });
 });
 
 describe("durable command idempotency", () => {

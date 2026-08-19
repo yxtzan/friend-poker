@@ -39,6 +39,12 @@ export interface DurableCommit {
   readonly pruneAllProcessedCommands?: boolean;
 }
 
+export interface VersionHighWaterCommit {
+  readonly runtimeVersion: number;
+  readonly identityGeneration?: number;
+  readonly identities?: readonly DurableIdentityRecord[];
+}
+
 function parseCommandData(serialized: string): RuntimeCommandData {
   let value: unknown;
   try {
@@ -243,18 +249,27 @@ export class PrismaPersistenceRepository {
     });
   }
 
-  public async commitIdentities(
-    identityGeneration: number,
-    identities: readonly DurableIdentityRecord[],
-  ): Promise<void> {
+  public async commitVersionHighWater(input: VersionHighWaterCommit): Promise<void> {
+    const includesIdentities =
+      input.identityGeneration !== undefined && input.identities !== undefined;
+    if ((input.identityGeneration === undefined) !== (input.identities === undefined)) {
+      throw new Error("Identity generation and records must be committed together");
+    }
     await this.#prisma.$transaction(async (transaction) => {
       await transaction.applicationState.update({
         where: { id: APPLICATION_STATE_ID },
-        data: { identityGeneration },
+        data: {
+          runtimeVersion: input.runtimeVersion,
+          ...(includesIdentities
+            ? { identityGeneration: input.identityGeneration }
+            : {}),
+        },
       });
-      await transaction.identity.deleteMany();
-      if (identities.length > 0) {
-        await transaction.identity.createMany({ data: [...identities] });
+      if (includesIdentities) {
+        await transaction.identity.deleteMany();
+        if (input.identities.length > 0) {
+          await transaction.identity.createMany({ data: [...input.identities] });
+        }
       }
     });
   }

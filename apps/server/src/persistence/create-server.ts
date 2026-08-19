@@ -56,7 +56,7 @@ export async function createPersistentPokerServer(
       identityGeneration: identities.generation,
       identities: identities.durableRecords(),
     });
-    return createPokerServer({
+    const server = createPokerServer({
       ...(options.allowedOrigins === undefined
         ? {}
         : { allowedOrigins: options.allowedOrigins }),
@@ -84,6 +84,8 @@ export async function createPersistentPokerServer(
       persistenceRepository: persistence,
       initialSitInitialGrantCommands: recovery.sitInitialGrantCommands,
     });
+    await server.initializeLifecycle();
+    return server;
   } catch (error) {
     await persistence.close().catch(() => undefined);
     throw error;

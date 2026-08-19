@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import type { RandomSource } from "@friend-poker/poker-engine";
 
 import { createPersistentPokerServer } from "../src/persistence/create-server.js";
+import type { LifecycleScheduler } from "../src/index.js";
 import type { TransportFixture } from "./transport-helpers.js";
 import { TEST_ORIGIN } from "./transport-helpers.js";
 
@@ -53,7 +54,15 @@ export interface PersistentFixtureFactory {
   readonly databasePath: string;
   readonly databaseUrl: string;
   readonly issuedCredentials: readonly string[];
-  start(): Promise<TransportFixture>;
+  start(options?: PersistentFixtureStartOptions): Promise<TransportFixture>;
+}
+
+export interface PersistentFixtureStartOptions {
+  readonly lifecycleScheduler?: LifecycleScheduler;
+  readonly disconnectedTurnTimeoutMs?: number;
+  readonly hostDisconnectGraceMs?: number;
+  readonly allOfflineTimeoutMs?: number;
+  readonly runoutStageDelayMs?: number;
 }
 
 export function persistentFixtureFactory(
@@ -69,7 +78,7 @@ export function persistentFixtureFactory(
     databasePath,
     databaseUrl,
     issuedCredentials,
-    async start(): Promise<TransportFixture> {
+    async start(startOptions: PersistentFixtureStartOptions = {}): Promise<TransportFixture> {
       const server = await createPersistentPokerServer({
         databaseUrl,
         allowedOrigins: [TEST_ORIGIN],
@@ -88,6 +97,21 @@ export function persistentFixtureFactory(
           return `persistent-player-${playerSequence}`;
         },
         rngForHand: (handId) => seededRandom(hashText(handId)),
+        ...(startOptions.lifecycleScheduler === undefined
+          ? {}
+          : { lifecycleScheduler: startOptions.lifecycleScheduler }),
+        ...(startOptions.disconnectedTurnTimeoutMs === undefined
+          ? {}
+          : { disconnectedTurnTimeoutMs: startOptions.disconnectedTurnTimeoutMs }),
+        ...(startOptions.hostDisconnectGraceMs === undefined
+          ? {}
+          : { hostDisconnectGraceMs: startOptions.hostDisconnectGraceMs }),
+        ...(startOptions.allOfflineTimeoutMs === undefined
+          ? {}
+          : { allOfflineTimeoutMs: startOptions.allOfflineTimeoutMs }),
+        ...(startOptions.runoutStageDelayMs === undefined
+          ? {}
+          : { runoutStageDelayMs: startOptions.runoutStageDelayMs }),
       });
       const listening = await server.listen();
       const sockets = new Set<TransportFixture["sockets"] extends Set<infer T> ? T : never>();

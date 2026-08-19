@@ -28,11 +28,21 @@ no partial action, pot, runout, or history survives. A completed hand commits
 its resulting `BETWEEN_HANDS` checkpoint and processed command in one SQLite
 transaction before the Socket.IO acknowledgement is sent.
 
-Every restart restores the persisted runtime version and advances it once,
-then persists that recovery version. This makes pre-restart expected versions
-stale without resetting the table to version zero. Restored players are always
-offline; socket IDs and continuous-online timestamps are not durable. The host
-identity is preserved and normal lifecycle rules resume as players reconnect.
+`ApplicationState.runtimeVersion` is a durable version high-water mark, not
+merely the version of the JSON checkpoint. Every applied mutation between safe
+checkpoints—including active-hand actions, connection-state changes, and
+lifecycle/system commands—updates that high-water mark before the successful
+result or Socket.IO acknowledgement is returned. High-water-only commits do not
+replace the older safe checkpoint or persist private hand state.
+
+Every restart restores the safe checkpoint at one version greater than the
+persisted high-water mark, then persists that recovery version. This makes all
+pre-restart expected versions stale without resetting the table to version
+zero. Restored players are always offline; socket IDs and continuous-online
+timestamps are not durable. The host identity is preserved. Before the
+persistent server factory returns, it awaits an initial lifecycle reconcile so
+fresh host-disconnect and all-offline windows are already scheduled even when
+no client reconnects after restart.
 
 Successful non-hand durable commands and their snapshot are committed
 atomically. The in-memory Milestone 6 cache is seeded from the durable command

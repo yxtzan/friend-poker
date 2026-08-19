@@ -97,6 +97,7 @@ export interface PokerServer {
   readonly runtime: SingleTableRuntime;
   listen(options?: ListenOptions): Promise<ListeningPokerServer>;
   close(): Promise<void>;
+  initializeLifecycle(): Promise<void>;
   settleLifecycle(): Promise<void>;
   isPersistenceHealthy(): boolean;
 }
@@ -272,19 +273,32 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
     if (
       persistence === undefined ||
       result.status === "REJECTED" ||
-      result.status === "DUPLICATE" ||
-      envelope.command.type === RuntimeCommandType.SetOnline
+      result.status === "DUPLICATE"
     ) {
       return result;
     }
 
     try {
+      if (envelope.command.type === RuntimeCommandType.SetOnline) {
+        if (result.status === "APPLIED") {
+          await persistence.commitVersionHighWater({ runtimeVersion: runtime.version });
+        }
+        return result;
+      }
       let checkpoint;
       try {
         checkpoint = runtime.exportDurableCheckpointState();
       } catch {
-        if (identityChanged) {
-          await persistence.commitIdentities(identities.generation, identities.durableRecords());
+        if (result.status === "APPLIED" || identityChanged) {
+          await persistence.commitVersionHighWater({
+            runtimeVersion: runtime.version,
+            ...(identityChanged
+              ? {
+                  identityGeneration: identities.generation,
+                  identities: identities.durableRecords(),
+                }
+              : {}),
+          });
         }
         return result;
       }
@@ -811,7 +825,11 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
           httpServer.close((error) => (error === undefined ? resolve() : reject(error)));
         });
       }
+      await authoritativeQueue;
       await persistence?.close();
+    },
+    initializeLifecycle(): Promise<void> {
+      return lifecycle.reconcile();
     },
     settleLifecycle(): Promise<void> {
       return lifecycle.settled();
