@@ -1,6 +1,11 @@
 export { BettingRuleError } from "./errors.js";
 export { determineBlindPositions, moveButton, nextEligibleSeat } from "./seats.js";
-export { applyAction, createBettingState, legalActions } from "./state-machine.js";
+export {
+  administrativelyFold,
+  applyAction,
+  createBettingState,
+  legalActions,
+} from "./state-machine.js";
 export {
   ActionSemantic,
   BettingStatus,

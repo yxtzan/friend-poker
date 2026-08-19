@@ -539,3 +539,52 @@ export function applyAction(state: BettingState, command: BettingCommand): Betti
   progressState(next, fromSeat);
   return freezeState(next);
 }
+
+/**
+ * Trusted lifecycle Fold for a live participant. Unlike applyAction, this may
+ * target a non-current participant and never commits or refunds chips.
+ */
+export function administrativelyFold(
+  state: BettingState,
+  targetPlayerId: PlayerId,
+): BettingState {
+  if (
+    state.status !== BettingStatus.Betting &&
+    state.status !== BettingStatus.RunoutRequired
+  ) {
+    throw new BettingRuleError("The hand is not waiting for an administrative Fold");
+  }
+  const next = toMutableState(state);
+  const participant = participantById(next, targetPlayerId);
+  if (participant.folded) throw new BettingRuleError("Participant is already folded");
+  const currentActorId = state.currentActorId;
+  participant.folded = true;
+  participant.lastActionBetLevel = next.currentBet;
+
+  const contenders = next.participants.filter(isContender);
+  if (contenders.length === 1) {
+    next.status = BettingStatus.Uncontested;
+    next.currentActorId = null;
+    next.uncontestedWinnerId = contenders[0]!.playerId;
+  } else if (state.status === BettingStatus.RunoutRequired) {
+    next.status = BettingStatus.RunoutRequired;
+    next.currentActorId = null;
+    next.uncontestedWinnerId = null;
+    refreshRaiseRights(next);
+  } else if (targetPlayerId === currentActorId) {
+    progressState(next, participant.seat);
+  } else {
+    if (currentActorId === null) {
+      throw new BettingRuleError("Administrative Fold found no current actor");
+    }
+    const currentActor = participantById(next, currentActorId);
+    if (!isActionable(currentActor) || !needsAction(currentActor, next.currentBet)) {
+      throw new BettingRuleError("Administrative Fold found an invalid current actor");
+    }
+    next.status = BettingStatus.Betting;
+    next.currentActorId = currentActorId;
+    next.uncontestedWinnerId = null;
+    refreshRaiseRights(next);
+  }
+  return freezeState(next);
+}

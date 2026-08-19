@@ -116,6 +116,15 @@ export class IdentityStore {
     this.#byPlayerId.delete(playerId);
   }
 
+  /** Invalidates every current-Session credential while retaining issued-token history. */
+  public invalidateSession(): void {
+    for (const record of this.#byPlayerId.values()) {
+      if (record.credential !== null) this.#playerIdByCredential.delete(record.credential);
+      record.credential = null;
+    }
+    this.#playerIdByNickname.clear();
+  }
+
   #generateUniqueCredential(): string {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const credential = this.#credentialGenerator();

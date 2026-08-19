@@ -1,7 +1,9 @@
 export { TableDomainError } from "./errors.js";
 export {
   adjustPlayerChips,
+  administrativelyFoldTableParticipant,
   advanceTableRunout,
+  autoEndSession,
   applyTableHandAction,
   changeBlinds,
   calculateNetResult,
@@ -16,6 +18,7 @@ export {
   replenishPlayer,
   revealTableUncontestedWinner,
   seatPlayer,
+  setLifecycleHost,
   setPlayerOnline,
   standToSpectate,
   startFirstHand,
@@ -34,7 +37,9 @@ export {
 } from "./types.js";
 export type {
   ActiveSession,
+  AdministrativeFoldTableInput,
   AdjustPlayerChipsInput,
+  AutoEndSessionInput,
   BlindConfiguration,
   ChangeBlindsInput,
   ChipLedgerEntry,
@@ -50,6 +55,7 @@ export type {
   SessionEndPreview,
   SessionPlayerSummary,
   SessionSummary,
+  SetLifecycleHostInput,
   SitPlayerInput,
   StartFirstHandInput,
   StartNextHandInput,

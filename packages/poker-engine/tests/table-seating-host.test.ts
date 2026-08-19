@@ -179,10 +179,18 @@ describe("explicit in-hand leave boundary", () => {
     const beforeTotal = state.players.reduce((sum, candidate) => sum + candidate.chipBalance, 0);
     state = leaveTable(state, "B");
     expect(player(state, "B")).toMatchObject({
-      seat: 1,
+      seat: null,
       present: false,
-      pendingLeaveAfterHand: true,
+      pendingLeaveAfterHand: false,
     });
+    expect(state.status).toBe(TableLifecycleStatus.BetweenHands);
+    expect(state.recentHands[0]?.record.events).toContainEqual(
+      expect.objectContaining({
+        type: "ADMINISTRATIVE_FOLD",
+        reason: "EXPLICIT_LEAVE",
+        targetPlayerId: "B",
+      }),
+    );
 
     while (state.status === TableLifecycleStatus.HandInProgress) {
       const actor = state.activeHand?.bettingState.currentActorId;

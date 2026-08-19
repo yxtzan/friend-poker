@@ -12,6 +12,7 @@ import type {
   CommandExecutionResult,
   EntryPosition,
   IdentityResponse,
+  LifecycleScheduler,
   PokerServer,
   SafeTableProjection,
   ServerToClientEvents,
@@ -46,7 +47,16 @@ export interface TransportFixture {
   close(): Promise<void>;
 }
 
-export async function createTransportFixture(options: { readonly secureCookies?: boolean } = {}) {
+export async function createTransportFixture(
+  options: {
+    readonly secureCookies?: boolean;
+    readonly lifecycleScheduler?: LifecycleScheduler;
+    readonly disconnectedTurnTimeoutMs?: number;
+    readonly hostDisconnectGraceMs?: number;
+    readonly allOfflineTimeoutMs?: number;
+    readonly runoutStageDelayMs?: number;
+  } = {},
+) {
   let credentialSequence = 0;
   let playerSequence = 0;
   const issuedCredentials: string[] = [];
@@ -63,6 +73,21 @@ export async function createTransportFixture(options: { readonly secureCookies?:
       playerSequence += 1;
       return `player-${playerSequence}`;
     },
+    ...(options.lifecycleScheduler === undefined
+      ? {}
+      : { lifecycleScheduler: options.lifecycleScheduler }),
+    ...(options.disconnectedTurnTimeoutMs === undefined
+      ? {}
+      : { disconnectedTurnTimeoutMs: options.disconnectedTurnTimeoutMs }),
+    ...(options.hostDisconnectGraceMs === undefined
+      ? {}
+      : { hostDisconnectGraceMs: options.hostDisconnectGraceMs }),
+    ...(options.allOfflineTimeoutMs === undefined
+      ? {}
+      : { allOfflineTimeoutMs: options.allOfflineTimeoutMs }),
+    ...(options.runoutStageDelayMs === undefined
+      ? {}
+      : { runoutStageDelayMs: options.runoutStageDelayMs }),
   });
   const listening = await server.listen();
   const sockets = new Set<TestSocket>();
@@ -147,7 +172,9 @@ export async function connectWithCookie(
   const connectPromise = waitForConnect(socket);
   socket.connect();
   await connectPromise;
-  return Object.freeze({ socket, initialProjection: await projectionPromise });
+  const initialProjection = await projectionPromise;
+  await fixture.server.settleLifecycle();
+  return Object.freeze({ socket, initialProjection });
 }
 
 export async function createConnectedClient(

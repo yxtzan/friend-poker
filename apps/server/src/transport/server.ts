@@ -7,10 +7,7 @@ import type { NextFunction, Request, Response } from "express";
 import { Server as SocketIOServer } from "socket.io";
 import type { Socket } from "socket.io";
 
-import {
-  HandLifecycleStatus,
-  TableLifecycleStatus,
-} from "@friend-poker/poker-engine";
+import { TableLifecycleStatus } from "@friend-poker/poker-engine";
 import type { PlayerId, RandomSource, TableSeat } from "@friend-poker/poker-engine";
 import {
   CommandRejectionReason,
@@ -32,6 +29,9 @@ import {
 } from "./identity.js";
 import type { IdentityStoreOptions } from "./identity.js";
 import { validateNickname } from "./nickname.js";
+import { LifecycleController } from "./lifecycle.js";
+import type { LifecycleScheduler } from "./scheduler.js";
+import { SystemLifecycleScheduler } from "./scheduler.js";
 import { TransportEvent } from "./types.js";
 import type {
   ClientCommandInput,
@@ -58,6 +58,11 @@ export interface PokerServerOptions extends IdentityStoreOptions {
   readonly allowedOrigins?: readonly string[];
   readonly secureCookies?: boolean;
   readonly cookieName?: string;
+  readonly lifecycleScheduler?: LifecycleScheduler;
+  readonly disconnectedTurnTimeoutMs?: number;
+  readonly hostDisconnectGraceMs?: number;
+  readonly allOfflineTimeoutMs?: number;
+  readonly runoutStageDelayMs?: number;
 }
 
 export interface ListenOptions {
@@ -76,6 +81,7 @@ export interface PokerServer {
   readonly runtime: SingleTableRuntime;
   listen(options?: ListenOptions): Promise<ListeningPokerServer>;
   close(): Promise<void>;
+  settleLifecycle(): Promise<void>;
 }
 
 function cryptoRandomSource(): RandomSource {
@@ -216,45 +222,73 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
     }
   }
 
-  async function advanceTrustedRunout(): Promise<void> {
-    while (
-      runtime.getProjection({ kind: "SPECTATOR" }).currentHand?.status ===
-      HandLifecycleStatus.RunoutRequired
-    ) {
-      const result = await executeSystem({ type: RuntimeCommandType.AdvanceRunout });
-      if (result.status !== "APPLIED") return;
-      broadcastProjections();
-    }
-  }
-
   async function enterIdentity(
     playerId: PlayerId,
     nickname: string,
     position: EntryPosition,
     includeInitialGrant: boolean,
   ): Promise<CommandExecutionResult> {
-    return runtime.execute(
-      Object.freeze({ kind: "PLAYER", playerId }),
-      Object.freeze({
-        commandId: nextServerCommandId("enter"),
-        actorId: playerId,
-        expectedVersion: runtime.version,
-        command: Object.freeze({
-          type: RuntimeCommandType.EnterTable,
-          nickname,
-          online: socketIdByPlayer.has(playerId),
-          position,
-          ...(includeInitialGrant
-            ? {
-                initialGrant: {
-                  ledgerEntryId: nextServerCommandId("initial-grant"),
-                },
-              }
-            : {}),
+    const initialGrantId = includeInitialGrant
+      ? nextServerCommandId("initial-grant")
+      : null;
+    let lastResult: CommandExecutionResult | null = null;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const result = await runtime.execute(
+        Object.freeze({ kind: "PLAYER", playerId }),
+        Object.freeze({
+          commandId: nextServerCommandId("enter"),
+          actorId: playerId,
+          expectedVersion: runtime.version,
+          command: Object.freeze({
+            type: RuntimeCommandType.EnterTable,
+            nickname,
+            online: socketIdByPlayer.has(playerId),
+            position,
+            ...(initialGrantId === null
+              ? {}
+              : { initialGrant: { ledgerEntryId: initialGrantId } }),
+          }),
         }),
-      }),
-    );
+      );
+      lastResult = result;
+      if (
+        result.status !== "REJECTED" ||
+        result.reason !== CommandRejectionReason.StaleVersion
+      ) {
+        return result;
+      }
+    }
+    if (lastResult === null) throw new Error("Identity entry did not execute");
+    return lastResult;
   }
+
+  const lifecycle = new LifecycleController({
+    runtime,
+    scheduler: options.lifecycleScheduler ?? new SystemLifecycleScheduler(),
+    executeSystem,
+    broadcast: broadcastProjections,
+    onSessionEnded() {
+      identities.invalidateSession();
+      for (const socket of io.sockets.sockets.values()) {
+        socket.data.suppressOffline = true;
+        socket.emit(TransportEvent.IdentityRevoked, { reason: "SESSION_ENDED" });
+        socket.disconnect(true);
+      }
+      socketIdByPlayer.clear();
+    },
+    ...(options.disconnectedTurnTimeoutMs === undefined
+      ? {}
+      : { disconnectedTurnTimeoutMs: options.disconnectedTurnTimeoutMs }),
+    ...(options.hostDisconnectGraceMs === undefined
+      ? {}
+      : { hostDisconnectGraceMs: options.hostDisconnectGraceMs }),
+    ...(options.allOfflineTimeoutMs === undefined
+      ? {}
+      : { allOfflineTimeoutMs: options.allOfflineTimeoutMs }),
+    ...(options.runoutStageDelayMs === undefined
+      ? {}
+      : { runoutStageDelayMs: options.runoutStageDelayMs }),
+  });
 
   app.use((request: Request, response: Response, next: NextFunction) => {
     const origin = request.header("origin");
@@ -314,6 +348,10 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
             message: result.message,
           } satisfies TransportErrorResponse);
           return;
+        }
+        if (result.status === "APPLIED") {
+          broadcastProjections();
+          await lifecycle.reconcile();
         }
       }
       if (existingCredential !== null) {
@@ -382,7 +420,10 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
         playerId: reissued.record.playerId,
         nickname: reissued.record.nickname,
       } satisfies IdentityResponse);
-      broadcastProjections();
+      if (result.status === "APPLIED") {
+        broadcastProjections();
+        await lifecycle.reconcile();
+      }
       return;
     }
 
@@ -411,7 +452,10 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
       playerId: created.record.playerId,
       nickname: created.record.nickname,
     } satisfies IdentityResponse);
-    broadcastProjections();
+    if (result.status === "APPLIED") {
+      broadcastProjections();
+      await lifecycle.reconcile();
+    }
   });
 
   app.use(
@@ -476,6 +520,7 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
     const playerId = socket.data.playerId!;
     if (socket.data.onlineMutationApplied === true) broadcastProjections();
     else socket.emit(TransportEvent.TableState, playerProjection(playerId));
+    void lifecycle.playerConnected(playerId).catch(() => undefined);
 
     socket.on(TransportEvent.TableCommand, (input: ClientCommandInput, acknowledge) => {
       if (typeof acknowledge !== "function") return;
@@ -526,6 +571,12 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
         acknowledged = true;
 
         if (result.status !== "APPLIED") return;
+        if (command.type === RuntimeCommandType.LeaveTable) {
+          socket.data.suppressOffline = true;
+          socketIdByPlayer.delete(playerId);
+          socket.disconnect(true);
+          await lifecycle.playerDisconnected(playerId);
+        }
         if (command.type === RuntimeCommandType.Kick) {
           const targetPlayerId = command.targetPlayerId;
           identities.revokeAfterKick(targetPlayerId);
@@ -539,9 +590,10 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
             }
             socketIdByPlayer.delete(targetPlayerId);
           }
+          await lifecycle.playerDisconnected(targetPlayerId);
         }
         broadcastProjections();
-        await advanceTrustedRunout();
+        await lifecycle.reconcile();
       })().catch(() => {
         if (!acknowledged) {
           acknowledge(rejectForPlayer(playerId, "INVALID_COMMAND", "Command could not be processed"));
@@ -557,9 +609,12 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
         type: RuntimeCommandType.SetOnline,
         targetPlayerId: playerId,
         online: false,
-      }).then((result) => {
-        if (result.status === "APPLIED") broadcastProjections();
-      });
+      })
+        .then(async (result) => {
+          if (result.status === "APPLIED") broadcastProjections();
+          await lifecycle.playerDisconnected(playerId);
+        })
+        .catch(() => undefined);
     });
   });
 
@@ -580,11 +635,15 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
       });
     },
     async close(): Promise<void> {
+      lifecycle.close();
       await new Promise<void>((resolve) => io.close(() => resolve()));
       if (!httpServer.listening) return;
       await new Promise<void>((resolve, reject) => {
         httpServer.close((error) => (error === undefined ? resolve() : reject(error)));
       });
+    },
+    settleLifecycle(): Promise<void> {
+      return lifecycle.settled();
     },
   });
 }

@@ -1,5 +1,6 @@
 import { createDeck, shuffleDeck } from "../cards.js";
 import {
+  administrativelyFold,
   applyAction,
   BettingStatus,
   createBettingState,
@@ -21,6 +22,8 @@ import {
   HoleCardRevealReason,
 } from "./types.js";
 import type {
+  AdministrativeFoldEvent,
+  AdministrativeFoldInput,
   BoardRevealEvent,
   HandActionEvent,
   HandCommand,
@@ -56,6 +59,7 @@ function freezeRevealedHand(hand: RevealedHoleCards): RevealedHoleCards {
 function freezeEvent(event: HandEvent): HandEvent {
   switch (event.type) {
     case "ACTION":
+    case "ADMINISTRATIVE_FOLD":
       return Object.freeze({ ...event });
     case "BOARD_REVEALED":
       return Object.freeze({ ...event, cards: freezeCards(event.cards) });
@@ -361,6 +365,41 @@ export function applyHandAction(
     board,
     remainingDeck,
     events,
+  });
+  return settleIfRequired(next);
+}
+
+export function administrativelyFoldHandParticipant(
+  state: OrchestratedHandState,
+  input: AdministrativeFoldInput,
+): OrchestratedHandState {
+  if (
+    (state.status !== HandLifecycleStatus.Betting &&
+      state.status !== HandLifecycleStatus.RunoutRequired) ||
+    (state.bettingState.status !== BettingStatus.Betting &&
+      state.bettingState.status !== BettingStatus.RunoutRequired)
+  ) {
+    throw new HandOrchestrationError("Hand is not waiting for an administrative Fold");
+  }
+  const bettingState = administrativelyFold(state.bettingState, input.targetPlayerId);
+  const event: AdministrativeFoldEvent = Object.freeze({
+    type: "ADMINISTRATIVE_FOLD",
+    sequence: state.events.length,
+    handId: state.handId,
+    targetPlayerId: input.targetPlayerId,
+    reason: input.reason,
+    operatorPlayerId: input.operatorPlayerId,
+  });
+  const next = freezeState({
+    ...state,
+    status:
+      bettingState.status === BettingStatus.Betting
+        ? HandLifecycleStatus.Betting
+        : bettingState.status === BettingStatus.RunoutRequired
+          ? HandLifecycleStatus.RunoutRequired
+          : state.status,
+    bettingState,
+    events: Object.freeze([...state.events, event]),
   });
   return settleIfRequired(next);
 }

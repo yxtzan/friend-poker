@@ -1,9 +1,12 @@
 import { isDeepStrictEqual } from "node:util";
 
 import {
+  AdministrativeFoldReason,
   adjustPlayerChips,
+  administrativelyFoldTableParticipant,
   advanceTableRunout,
   applyTableHandAction,
+  autoEndSession,
   changeBlinds,
   createTableState,
   endSession,
@@ -15,6 +18,7 @@ import {
   replenishPlayer,
   revealTableUncontestedWinner,
   seatPlayer,
+  setLifecycleHost,
   setPlayerOnline,
   standToSpectate,
   startFirstHand,
@@ -55,6 +59,7 @@ const HOST_COMMAND_TYPES = new Set<RuntimeCommand["type"]>([
   RuntimeCommandType.StartSession,
   RuntimeCommandType.StartFirstHand,
   RuntimeCommandType.StartNextHand,
+  RuntimeCommandType.HostForceFold,
   RuntimeCommandType.HostAdjustChips,
   RuntimeCommandType.ChangeBlinds,
   RuntimeCommandType.TransferHost,
@@ -64,7 +69,10 @@ const HOST_COMMAND_TYPES = new Set<RuntimeCommand["type"]>([
 ]);
 const SYSTEM_COMMAND_TYPES = new Set<RuntimeCommand["type"]>([
   RuntimeCommandType.SetOnline,
+  RuntimeCommandType.AdministrativeFold,
   RuntimeCommandType.AdvanceRunout,
+  RuntimeCommandType.SetLifecycleHost,
+  RuntimeCommandType.AutoEndSession,
 ]);
 
 interface ProcessedCommand {
@@ -441,6 +449,38 @@ export class SingleTableRuntime {
           state: applyTableHandAction(this.#state, pokerCommand(playerId, command.action)),
           data: NO_DATA,
         };
+      case RuntimeCommandType.AdministrativeFold:
+        return {
+          state: administrativelyFoldTableParticipant(this.#state, {
+            targetPlayerId: command.targetPlayerId,
+            reason: command.reason,
+            operatorPlayerId: null,
+          }),
+          data: NO_DATA,
+        };
+      case RuntimeCommandType.HostForceFold: {
+        const participant = this.#state.activeHand?.bettingState.participants.find(
+          (candidate) => candidate.playerId === command.targetPlayerId,
+        );
+        if (
+          this.#state.activeHand?.bettingState.currentActorId !== command.targetPlayerId ||
+          participant === undefined ||
+          participant.folded ||
+          participant.allIn
+        ) {
+          throw new InvalidRuntimeCommandError(
+            "Host force Fold requires the current actionable participant",
+          );
+        }
+        return {
+          state: administrativelyFoldTableParticipant(this.#state, {
+            targetPlayerId: command.targetPlayerId,
+            reason: AdministrativeFoldReason.HostForceFold,
+            operatorPlayerId: playerId,
+          }),
+          data: NO_DATA,
+        };
+      }
       case RuntimeCommandType.AdvanceRunout:
         return { state: advanceTableRunout(this.#state), data: NO_DATA };
       case RuntimeCommandType.RevealUncontested:
@@ -485,6 +525,13 @@ export class SingleTableRuntime {
           }),
           data: NO_DATA,
         };
+      case RuntimeCommandType.SetLifecycleHost:
+        return {
+          state: setLifecycleHost(this.#state, {
+            targetPlayerId: command.targetPlayerId,
+          }),
+          data: NO_DATA,
+        };
       case RuntimeCommandType.Kick:
         return {
           state: kickPlayer(this.#state, {
@@ -506,6 +553,15 @@ export class SingleTableRuntime {
           state: endSession(this.#state, {
             operatorPlayerId: playerId,
             confirmation: command.confirmation,
+            ...(command.endMetadata === undefined
+              ? {}
+              : { endMetadata: command.endMetadata }),
+          }),
+          data: NO_DATA,
+        };
+      case RuntimeCommandType.AutoEndSession:
+        return {
+          state: autoEndSession(this.#state, {
             ...(command.endMetadata === undefined
               ? {}
               : { endMetadata: command.endMetadata }),

@@ -123,7 +123,8 @@ describe("disconnect, reconnect, and kick lifecycle", () => {
       }),
     );
     expect(left.status).toBe("APPLIED");
-    expect(client.socket.connected).toBe(true);
+    await waitForDisconnect(client.socket);
+    expect(client.socket.connected).toBe(false);
     expect(findPublicPlayer(left.projection, client.identity.playerId)).toBeUndefined();
 
     const reentered = await enterIdentity(

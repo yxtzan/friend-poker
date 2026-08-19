@@ -13,6 +13,18 @@ export {
 } from "./transport/identity.js";
 export { TransportEvent } from "./transport/types.js";
 export {
+  DEFAULT_ALL_OFFLINE_TIMEOUT_MS,
+  DEFAULT_DISCONNECTED_TURN_TIMEOUT_MS,
+  DEFAULT_HOST_DISCONNECT_GRACE_MS,
+  DEFAULT_RUNOUT_STAGE_DELAY_MS,
+  LifecycleController,
+} from "./transport/lifecycle.js";
+export { SystemLifecycleScheduler } from "./transport/scheduler.js";
+export type {
+  LifecycleScheduler,
+  LifecycleTimerHandle,
+} from "./transport/scheduler.js";
+export {
   CommandRejectionReason,
   RuntimeCommandType,
 } from "./runtime/types.js";
@@ -40,6 +52,7 @@ export type {
   TableViewer,
 } from "./runtime/types.js";
 export type {
+  ClientRuntimeCommand,
   ClientCommandInput,
   ClientToServerEvents,
   EntryPosition,
