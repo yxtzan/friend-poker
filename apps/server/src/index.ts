@@ -1,5 +1,17 @@
 export { SingleTableRuntime } from "./runtime/runtime.js";
 export { projectTableState } from "./runtime/projection.js";
+export { createPokerServer } from "./transport/server.js";
+export {
+  NICKNAME_MAX_CODE_POINTS,
+  NicknameRejection,
+  validateNickname,
+} from "./transport/nickname.js";
+export {
+  DEFAULT_IDENTITY_COOKIE_NAME,
+  readCookie,
+  serializeIdentityCookie,
+} from "./transport/identity.js";
+export { TransportEvent } from "./transport/types.js";
 export {
   CommandRejectionReason,
   RuntimeCommandType,
@@ -27,3 +39,25 @@ export type {
   SystemPrincipal,
   TableViewer,
 } from "./runtime/types.js";
+export type {
+  ClientCommandInput,
+  ClientToServerEvents,
+  EntryPosition,
+  IdentityResponse,
+  InterServerEvents,
+  ServerToClientEvents,
+  SocketData,
+  TransportErrorResponse,
+} from "./transport/types.js";
+export type {
+  ListenOptions,
+  ListeningPokerServer,
+  PokerServer,
+  PokerServerOptions,
+} from "./transport/server.js";
+export type {
+  IdentityRecord,
+  IdentityState,
+  IdentityStoreOptions,
+} from "./transport/identity.js";
+export type { NicknameValidationResult } from "./transport/nickname.js";

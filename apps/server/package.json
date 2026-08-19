@@ -7,10 +7,19 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@friend-poker/poker-engine": "0.0.0"
+    "@friend-poker/poker-engine": "0.0.0",
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "socket.io-client": "^4.8.3",
+    "tsx": "^4.23.12"
   }
 }
