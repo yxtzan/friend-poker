@@ -28,6 +28,10 @@ import {
   serializeIdentityCookie,
 } from "./identity.js";
 import type { IdentityStoreOptions } from "./identity.js";
+import {
+  ClientSitInitialGrantRegistry,
+  clientSitInitialGrantLedgerEntryId,
+} from "./initial-grant.js";
 import { validateNickname } from "./nickname.js";
 import { LifecycleController } from "./lifecycle.js";
 import type { LifecycleScheduler } from "./scheduler.js";
@@ -168,6 +172,7 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
     },
   });
   const socketIdByPlayer = new Map<PlayerId, string>();
+  const clientSitInitialGrants = new ClientSitInitialGrantRegistry();
   let serverCommandSequence = 0;
 
   function nextServerCommandId(purpose: string): string {
@@ -545,13 +550,22 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
         let command = inputRecord.command as RuntimeCommand;
         if (commandRecord?.type === RuntimeCommandType.Sit) {
           const projection = playerProjection(playerId);
+          const initialGrantLedgerEntryId = clientSitInitialGrantLedgerEntryId(
+            playerId,
+            commandId,
+          );
+          const includeInitialGrant = clientSitInitialGrants.resolve(
+            playerId,
+            commandId,
+            hasActiveSession(projection) && !playerHasInitialGrant(projection, playerId),
+          );
           command = {
             type: RuntimeCommandType.Sit,
             seat: commandRecord.seat as TableSeat,
-            ...(hasActiveSession(projection) && !playerHasInitialGrant(projection, playerId)
+            ...(includeInitialGrant
               ? {
                   initialGrant: {
-                    ledgerEntryId: nextServerCommandId("initial-grant"),
+                    ledgerEntryId: initialGrantLedgerEntryId,
                   },
                 }
               : {}),

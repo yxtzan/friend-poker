@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { RuntimeCommandType, TransportEvent } from "../src/index.js";
+import {
+  ClientSitInitialGrantRegistry,
+  clientSitInitialGrantLedgerEntryId,
+} from "../src/transport/initial-grant.js";
 import type { TransportFixture } from "./transport-helpers.js";
 import {
   createConnectedClient,
@@ -180,5 +184,101 @@ describe("transport acknowledgement and broadcast policy", () => {
     expect(noOp.status).toBe("NO_OP");
     expect(rejected.status).toBe("REJECTED");
     expect(bobBroadcasts).toBe(broadcastsAfterApplied);
+  });
+});
+
+describe("client SIT initial-grant IDs", () => {
+  it("derives a stable namespaced ID from the authenticated player and command", () => {
+    const original = clientSitInitialGrantLedgerEntryId("player-a", "sit-123");
+
+    expect(clientSitInitialGrantLedgerEntryId("player-a", "sit-123")).toBe(original);
+    expect(clientSitInitialGrantLedgerEntryId("player-b", "sit-123")).not.toBe(original);
+    expect(clientSitInitialGrantLedgerEntryId("player-a", "sit-456")).not.toBe(original);
+    expect(original).toMatch(/^transport-sit-initial-grant-[a-f0-9]{64}$/u);
+  });
+
+  it("retains the original state-dependent enrichment by principal and command ID", () => {
+    const registry = new ClientSitInitialGrantRegistry();
+
+    expect(registry.resolve("player-a", "sit-123", true)).toBe(true);
+    expect(registry.resolve("player-a", "sit-123", false)).toBe(true);
+    expect(registry.resolve("player-a", "sit-456", false)).toBe(false);
+    expect(registry.resolve("player-b", "sit-123", false)).toBe(false);
+  });
+});
+
+describe("SIT transport idempotency", () => {
+  it("replays a first-Session spectator SIT as DUPLICATE without granting chips twice", async () => {
+    await startedPair();
+    const spectator = await createConnectedClient(fixture!, "Watcher", {
+      kind: "SPECTATOR",
+    });
+    const input = nextCommand(spectator.latestProjection, "spectator-sit-once", {
+      type: RuntimeCommandType.Sit,
+      seat: 2,
+    });
+
+    const first = await executeSocketCommand(spectator.socket, input);
+    const versionAfterFirst = first.version;
+    const firstGrantEntries = first.projection.session?.ledger.filter(
+      (entry) =>
+        entry.playerId === spectator.identity.playerId && entry.type === "INITIAL_GRANT",
+    );
+
+    expect(first.status).toBe("APPLIED");
+    expect(findPublicPlayer(first.projection, spectator.identity.playerId)).toMatchObject({
+      seat: 2,
+      chipBalance: 100,
+    });
+    expect(firstGrantEntries).toEqual([
+      expect.objectContaining({
+        ledgerEntryId: clientSitInitialGrantLedgerEntryId(
+          spectator.identity.playerId,
+          input.commandId,
+        ),
+      }),
+    ]);
+
+    const duplicate = await executeSocketCommand(spectator.socket, input);
+    const duplicateGrantEntries = duplicate.projection.session?.ledger.filter(
+      (entry) =>
+        entry.playerId === spectator.identity.playerId && entry.type === "INITIAL_GRANT",
+    );
+
+    expect(duplicate).toMatchObject({
+      status: "DUPLICATE",
+      commandId: input.commandId,
+      version: versionAfterFirst,
+      originalStatus: "APPLIED",
+      originalVersion: versionAfterFirst,
+    });
+    expect(findPublicPlayer(duplicate.projection, spectator.identity.playerId)?.chipBalance).toBe(
+      100,
+    );
+    expect(duplicateGrantEntries).toHaveLength(1);
+    expect(fixture!.server.runtime.version).toBe(versionAfterFirst);
+
+    const collision = await executeSocketCommand(spectator.socket, {
+      ...input,
+      command: { type: RuntimeCommandType.Sit, seat: 3 },
+    });
+
+    expect(collision).toMatchObject({
+      status: "REJECTED",
+      commandId: input.commandId,
+      version: versionAfterFirst,
+      reason: "INVALID_COMMAND",
+    });
+    expect(fixture!.server.runtime.version).toBe(versionAfterFirst);
+    expect(findPublicPlayer(collision.projection, spectator.identity.playerId)).toMatchObject({
+      seat: 2,
+      chipBalance: 100,
+    });
+    expect(
+      collision.projection.session?.ledger.filter(
+        (entry) =>
+          entry.playerId === spectator.identity.playerId && entry.type === "INITIAL_GRANT",
+      ),
+    ).toHaveLength(1);
   });
 });
