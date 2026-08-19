@@ -43,6 +43,7 @@ export type {
   RuntimeCommand,
   RuntimeCommandData,
   RuntimeOptions,
+  RuntimeProcessedCommandRecord,
   RuntimePokerAction,
   RuntimePrincipal,
   SafeTableProjection,

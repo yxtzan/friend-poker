@@ -14,7 +14,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22 <23"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

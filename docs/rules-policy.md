@@ -158,9 +158,9 @@ v1 中房主强制 Fold 只能针对当前行动且尚未 Fold/All-in 的玩家�
 
 ## 17. 部署与数据库
 
-部署平台暂不在 Milestone 1 决定。
+v1 的生产部署固定为 Railway 单应用副本、一个挂载到 `/data` 的持久 Volume、SQLite 与 Prisma。生产数据库 URL 为 `file:/data/friend-poker.db`。不使用 Redis、PostgreSQL、水平扩展或多副本；本地开发使用普通 SQLite 文件。
 
-本地开发可使用 SQLite。进入持久化里程碑前必须确定部署目标：若单实例服务器具备可靠持久磁盘，可继续 SQLite；若部署环境文件系统是临时的，则在正式持久化设计落地前选择 PostgreSQL。
+该决定依赖“始终只有一个应用副本”这一硬约束。SQLite 文件必须位于 Railway Volume，不能写入临时部署文件系统。Volume 只在运行时可用，因此生产 migration 在启动阶段运行，不在镜像构建阶段访问生产数据库。未来若需要多副本，必须先重新设计数据库、并发与分布式协调边界；本里程碑不预实现 PostgreSQL。
 
 ## 18. 实时生命周期计时
 

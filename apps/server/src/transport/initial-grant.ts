@@ -47,4 +47,25 @@ export class ClientSitInitialGrantRegistry {
     }
     return includeForFirstReception;
   }
+
+  public seed(
+    records: readonly {
+      readonly playerId: PlayerId;
+      readonly commandId: string;
+      readonly includeInitialGrant: boolean;
+    }[],
+  ): void {
+    for (const record of records) {
+      const key = clientCommandKey(record.playerId, record.commandId);
+      if (this.#inclusionByCommand.has(key)) {
+        throw new Error("Duplicate durable SIT enrichment record");
+      }
+      this.#inclusionByCommand.set(key, record.includeInitialGrant);
+    }
+    while (this.#inclusionByCommand.size > this.#limit) {
+      const oldest = this.#inclusionByCommand.keys().next().value as string | undefined;
+      if (oldest === undefined) break;
+      this.#inclusionByCommand.delete(oldest);
+    }
+  }
 }

@@ -1,71 +1,119 @@
 # Friend Poker server
 
-Milestone 8 provides one permanent Express and Socket.IO table around the
-authoritative `SingleTableRuntime`. It does not provide rooms, a lobby, UI, or
-persistence.
+Milestone 9 provides one permanent Express and Socket.IO table backed by a
+Prisma/SQLite recovery store. The v1 production shape is deliberately narrow:
+one Railway application replica and one persistent Railway Volume. There are
+no rooms, lobby, UI, PostgreSQL, Redis, or horizontal scaling.
+
+## Persistence and recovery
+
+The repository stores three explicit record groups:
+
+- `ApplicationState`: schema version, authoritative runtime version, identity
+  generation, and a validated JSON checkpoint;
+- `Identity`: Session/gathering-scoped player identity and SHA-256 recovery
+  credential digest (never the raw cookie value);
+- `ProcessedCommand`: principal, command fingerprint, original result metadata,
+  and the server-owned SIT enrichment bit needed for durable retry safety.
+
+The checkpoint contains only safe non-hand state: Session, balances, ledger,
+seats, host, blinds, the newest 20 safe hand records, and the newest 20 Session
+summaries. Serialization rejects `HAND_IN_PROGRESS` and never writes an active
+hand's deck, private cards, or betting state.
+
+Starting a hand leaves the prior non-hand checkpoint untouched. If the process
+dies before the hand completes and commits, restart restores that checkpoint:
+the unfinished hand disappears, balances return to their pre-hand values, and
+no partial action, pot, runout, or history survives. A completed hand commits
+its resulting `BETWEEN_HANDS` checkpoint and processed command in one SQLite
+transaction before the Socket.IO acknowledgement is sent.
+
+Every restart restores the persisted runtime version and advances it once,
+then persists that recovery version. This makes pre-restart expected versions
+stale without resetting the table to version zero. Restored players are always
+offline; socket IDs and continuous-online timestamps are not durable. The host
+identity is preserved and normal lifecycle rules resume as players reconnect.
+
+Successful non-hand durable commands and their snapshot are committed
+atomically. The in-memory Milestone 6 cache is seeded from the durable command
+records. The table retains at most the newest 4,096 successful durable commands
+for the current gathering; Session end deletes them after atomically committing
+the ended Session and identity-generation reset. Commands belonging only to an
+abortable active hand remain process-local. A persisted first-Session SIT also
+stores its server-derived enrichment bit, so the same authenticated command ID
+reconstructs the same runtime command after restart and returns `DUPLICATE`
+without a second grant.
+
+If a required SQLite write fails, that mutation is not acknowledged as durable
+success. The process marks persistence unhealthy, `/health` returns 503, and
+further mutations fail closed; v1 does not continue with memory knowingly ahead
+of SQLite.
 
 ## Browser identity flow
 
-`POST /identity/enter` accepts a nickname and either a spectator position or a
-seat from 0 through 5. A successful new entry sets the opaque
-`friend_poker_identity` recovery credential as a 30-day `HttpOnly`,
-`SameSite=Strict`, `Path=/` cookie. Production configuration also sets
-`Secure`. The credential is stored only in the in-memory identity registry and
-is never returned in JSON or a Socket.IO payload.
+`POST /identity/enter` accepts a nickname and a spectator or seat position. A
+successful entry sets the opaque `friend_poker_identity` as a 30-day
+`HttpOnly`, `SameSite=Strict`, `Path=/` cookie; production also sets `Secure`.
+Only a SHA-256 digest of the high-entropy credential is retained in memory and
+SQLite. The raw value is never returned in JSON, logged, or included in public
+state.
 
-Nicknames are trimmed and contain 1 through 12 Unicode code points. Only Han
-characters, ASCII English letters, and ASCII digits are accepted. Spaces,
-punctuation, emoji, and other scripts are rejected. Nicknames are exact and
-case-sensitive. A valid recovery cookie restores the registered nickname and
-ignores any attempted replacement.
+An active credential survives a server restart in the same gathering. Kick
+persists revocation before re-entry can issue a new credential. Session end
+atomically advances the identity generation and removes current identities, so
+old cookies remain invalid after restart and nickname uniqueness resets for the
+next gathering.
 
-A kicked identity may use the explicit `reenterAfterKick: true` entry path with
-the same nickname. The server restores the existing player ID and Session
-ledger identity, issues a new credential, and does not grant a second initial
-stack.
+## Local database commands
 
-## Socket protocol
+Use Node 22 (the repository requires `>=22 <23`). From the repository root:
 
-The browser sends `TABLE_COMMAND` with only `commandId`, `expectedVersion`, and
-the typed command. It never sends an authoritative actor or principal. The
-server derives both from the credential-bound socket and acknowledges with the
-Milestone 6 execution result.
+```sh
+npm install
+npm run prisma:generate --workspace @friend-poker/server
+npm run db:migrate:dev --workspace @friend-poker/server -- --name local
+npm run db:test:setup --workspace @friend-poker/server
+npm run db:migrate:deploy --workspace @friend-poker/server
+```
 
-An `APPLIED` result broadcasts a separately generated `TABLE_STATE` projection
-to every connected identity. `NO_OP`, `DUPLICATE`, and `REJECTED` results are
-acknowledged only to the caller. `IDENTITY_REVOKED` is sent before disconnecting
-a successfully kicked identity.
+`prisma:generate` generates the ignored Prisma client. `db:migrate:dev` creates
+local development migrations. `db:test:setup` synchronizes a disposable test
+database from the Prisma schema. `db:migrate:deploy` applies checked-in
+migrations and is the production command. Set `DATABASE_URL` before running a
+command; the local fallback is `file:./dev.db` relative to `apps/server/prisma`.
+No database file is required by poker-engine unit tests.
 
-## Process configuration
+## Railway v1 configuration
 
-- `PORT` defaults to `3000`.
-- `HOST` defaults to `0.0.0.0`.
-- `ALLOWED_ORIGINS` is a comma-separated exact allowlist and defaults to
-  `http://localhost:5173`.
-- `NODE_ENV=production` enables `Secure` identity cookies.
+- exactly one application replica;
+- one persistent Volume mounted at `/data`;
+- `DATABASE_URL=file:/data/friend-poker.db`;
+- `HOST=0.0.0.0`;
+- `PORT` supplied by Railway;
+- `NODE_ENV=production`;
+- `ALLOWED_ORIGINS` set to the exact deployed frontend origin (comma-separated
+  only when more than one explicit origin is required);
+- health-check path `/health`.
 
-Use `npm run dev --workspace @friend-poker/server` for watch mode or
-`npm start --workspace @friend-poker/server` for the current TypeScript
-bootstrap. Production build and deployment are deferred.
+Run production migration at runtime, when `/data` is mounted, and then start
+the server:
 
-## Lifecycle timing
+```sh
+npm run db:migrate:deploy --workspace @friend-poker/server && npm start --workspace @friend-poker/server
+```
 
-Milestone 8 owns connection timers through an injectable scheduler. Production defaults are:
+Do not run the production migration during image build because Railway Volumes
+are not mounted then. This milestone documents the deployment but does not
+perform it.
 
-- disconnected current actor Fold: 60 seconds;
-- disconnected host transfer: 60 seconds;
-- continuously all-offline Session end: 30 minutes;
-- All-in board Runout: 750ms before each Flop, Turn, and River stage.
+## Socket and lifecycle boundaries
 
-Connected players have no normal action clock. Recovery credentials do not expire at 60 seconds;
-they remain valid for the current Session identity lifetime. Ending a Session revokes every old
-credential, clears seats/online/host state, and requires fresh nickname entry with a new identity
-for the next gathering. State and summaries remain in memory only.
+The browser sends only `commandId`, `expectedVersion`, and a typed command. The
+server derives the principal from the credential-bound socket. Public HTTP and
+Socket.IO projections never contain raw snapshots, Prisma rows, credentials or
+digests, command fingerprints, private hole cards, or remaining deck state.
 
-Host election prefers online seated players, then online spectators. Within a class, the longest
-continuously online player wins; exact ties use lexical `playerId`. Explicit host leave transfers
-immediately without grace.
-
-All administrative Folds preserve committed chips and write a safe hand-history audit event with
-the reason (`DISCONNECT_TIMEOUT`, `EXPLICIT_LEAVE`, `KICK`, or `HOST_FORCE_FOLD`). Only
-`HOST_FORCE_FOLD` is browser-visible, and it remains host-only and current-actor-only.
+Lifecycle timing remains unchanged: disconnected current actor Fold and host
+transfer use 60 seconds, continuously all-offline Session end uses 30 minutes,
+and each All-in runout stage uses 750ms. The administrative Fold API and normal
+poker rules are unchanged.

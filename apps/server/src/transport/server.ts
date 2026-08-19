@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -18,9 +18,11 @@ import type {
   CommandExecutionResult,
   RejectedCommandResult,
   RuntimeCommand,
+  RuntimePrincipal,
   SafeTableProjection,
 } from "../runtime/types.js";
 import { SingleTableRuntime } from "../runtime/runtime.js";
+import type { PrismaPersistenceRepository } from "../persistence/repository.js";
 import {
   DEFAULT_IDENTITY_COOKIE_NAME,
   IdentityStore,
@@ -59,6 +61,16 @@ type PokerSocket = Socket<
 
 export interface PokerServerOptions extends IdentityStoreOptions {
   readonly runtime?: SingleTableRuntime;
+  /** Trusted internal dependency used by createPersistentPokerServer. */
+  readonly identityStore?: IdentityStore;
+  /** Trusted internal dependency used by createPersistentPokerServer. */
+  readonly persistenceRepository?: PrismaPersistenceRepository;
+  /** Trusted durable SIT enrichments loaded during restart recovery. */
+  readonly initialSitInitialGrantCommands?: readonly {
+    readonly playerId: PlayerId;
+    readonly commandId: string;
+    readonly includeInitialGrant: boolean;
+  }[];
   readonly allowedOrigins?: readonly string[];
   readonly secureCookies?: boolean;
   readonly cookieName?: string;
@@ -86,6 +98,7 @@ export interface PokerServer {
   listen(options?: ListenOptions): Promise<ListeningPokerServer>;
   close(): Promise<void>;
   settleLifecycle(): Promise<void>;
+  isPersistenceHealthy(): boolean;
 }
 
 function cryptoRandomSource(): RandomSource {
@@ -141,7 +154,7 @@ function authenticationError(code: string, message: string): Error {
 export function createPokerServer(options: PokerServerOptions = {}): PokerServer {
   const runtime =
     options.runtime ?? new SingleTableRuntime({ rngForHand: () => cryptoRandomSource() });
-  const identities = new IdentityStore({
+  const identities = options.identityStore ?? new IdentityStore({
     ...(options.credentialGenerator === undefined
       ? {}
       : { credentialGenerator: options.credentialGenerator }),
@@ -149,6 +162,7 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
       ? {}
       : { playerIdGenerator: options.playerIdGenerator }),
   });
+  const persistence = options.persistenceRepository;
   const cookieName = options.cookieName ?? DEFAULT_IDENTITY_COOKIE_NAME;
   const secureCookies = options.secureCookies ?? process.env.NODE_ENV === "production";
   const allowedOrigins = new Set(options.allowedOrigins ?? ["http://localhost:5173"]);
@@ -173,11 +187,17 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
   });
   const socketIdByPlayer = new Map<PlayerId, string>();
   const clientSitInitialGrants = new ClientSitInitialGrantRegistry();
+  clientSitInitialGrants.seed(options.initialSitInitialGrantCommands ?? []);
+  let persistenceHealthy = true;
+  let authoritativeQueue = Promise.resolve();
   let serverCommandSequence = 0;
+  const serverCommandNamespace = persistence === undefined ? null : randomUUID();
 
   function nextServerCommandId(purpose: string): string {
     serverCommandSequence += 1;
-    return `transport-${purpose}-${serverCommandSequence}`;
+    return serverCommandNamespace === null
+      ? `transport-${purpose}-${serverCommandSequence}`
+      : `transport-${purpose}-${serverCommandNamespace}-${serverCommandSequence}`;
   }
 
   function playerProjection(playerId: PlayerId): SafeTableProjection {
@@ -199,17 +219,119 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
     });
   }
 
+  function enqueueAuthoritative<T>(operation: () => Promise<T>): Promise<T> {
+    const result = authoritativeQueue.then(operation, operation);
+    authoritativeQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  function executeAuthoritative(
+    principal: RuntimePrincipal,
+    envelope: CommandEnvelope,
+    hooks: {
+      readonly identityChangedBeforeExecute?: boolean;
+      readonly onApplied?: () => void;
+      readonly sitInitialGrant?: boolean;
+    } = {},
+  ): Promise<CommandExecutionResult> {
+    return enqueueAuthoritative(() => executeAuthoritativeSerial(principal, envelope, hooks));
+  }
+
+  async function executeAuthoritativeSerial(
+    principal: RuntimePrincipal,
+    envelope: CommandEnvelope,
+    hooks: {
+      readonly identityChangedBeforeExecute?: boolean;
+      readonly onApplied?: () => void;
+      readonly sitInitialGrant?: boolean;
+    },
+  ): Promise<CommandExecutionResult> {
+    if (!persistenceHealthy) throw new Error("Durable persistence is unavailable");
+    const result = await runtime.execute(principal, envelope);
+    let identityChanged = hooks.identityChangedBeforeExecute === true;
+    if (result.status === "APPLIED") {
+      if (envelope.command.type === RuntimeCommandType.Kick) {
+        identities.revokeAfterKick(envelope.command.targetPlayerId);
+        identityChanged = true;
+      }
+      if (
+        envelope.command.type === RuntimeCommandType.EndSession ||
+        envelope.command.type === RuntimeCommandType.AutoEndSession
+      ) {
+        identities.invalidateSession();
+        identityChanged = true;
+      }
+      if (hooks.onApplied !== undefined) {
+        hooks.onApplied();
+        identityChanged = true;
+      }
+    }
+    if (
+      persistence === undefined ||
+      result.status === "REJECTED" ||
+      result.status === "DUPLICATE" ||
+      envelope.command.type === RuntimeCommandType.SetOnline
+    ) {
+      return result;
+    }
+
+    try {
+      let checkpoint;
+      try {
+        checkpoint = runtime.exportDurableCheckpointState();
+      } catch {
+        if (identityChanged) {
+          await persistence.commitIdentities(identities.generation, identities.durableRecords());
+        }
+        return result;
+      }
+      const processedCommand = runtime.processedCommandRecord(envelope.commandId);
+      if (processedCommand === null) {
+        throw new Error("Successful runtime command has no idempotency record");
+      }
+      const sessionEnded =
+        envelope.command.type === RuntimeCommandType.EndSession ||
+        envelope.command.type === RuntimeCommandType.AutoEndSession;
+      await persistence.commit({
+        tableState: checkpoint,
+        runtimeVersion: runtime.version,
+        identityGeneration: identities.generation,
+        identities: identities.durableRecords(),
+        ...(sessionEnded ? { pruneAllProcessedCommands: true } : { processedCommand }),
+        ...(hooks.sitInitialGrant === undefined
+          ? {}
+          : { sitInitialGrant: hooks.sitInitialGrant }),
+      });
+      return result;
+    } catch (error) {
+      persistenceHealthy = false;
+      throw new Error("Durable persistence commit failed", { cause: error });
+    }
+  }
+
   async function executeSystem(command: RuntimeCommand): Promise<CommandExecutionResult> {
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      const result = await runtime.execute(
-        Object.freeze({ kind: "SYSTEM", systemId: SYSTEM_ID }),
-        Object.freeze({
-          commandId: nextServerCommandId("system"),
-          actorId: SYSTEM_ID,
-          expectedVersion: runtime.version,
-          command,
-        }),
-      );
+      const principal = Object.freeze({ kind: "SYSTEM" as const, systemId: SYSTEM_ID });
+      const envelope = Object.freeze({
+        commandId: nextServerCommandId("system"),
+        actorId: SYSTEM_ID,
+        expectedVersion: runtime.version,
+        command,
+      });
+      const result =
+        persistence === undefined
+          ? await runtime.execute(principal, envelope)
+          : await executeAuthoritative(principal, envelope);
+      if (
+        persistence === undefined &&
+        result.status === "APPLIED" &&
+        command.type === RuntimeCommandType.AutoEndSession
+      ) {
+        identities.invalidateSession();
+      }
       if (
         result.status !== "REJECTED" ||
         result.reason !== CommandRejectionReason.StaleVersion
@@ -227,18 +349,22 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
     }
   }
 
-  async function enterIdentity(
+  async function enterIdentitySerial(
     playerId: PlayerId,
     nickname: string,
     position: EntryPosition,
     includeInitialGrant: boolean,
+    hooks: {
+      readonly identityChangedBeforeExecute?: boolean;
+      readonly onApplied?: () => void;
+    } = {},
   ): Promise<CommandExecutionResult> {
     const initialGrantId = includeInitialGrant
       ? nextServerCommandId("initial-grant")
       : null;
     let lastResult: CommandExecutionResult | null = null;
     for (let attempt = 0; attempt < 4; attempt += 1) {
-      const result = await runtime.execute(
+      const result = await executeAuthoritativeSerial(
         Object.freeze({ kind: "PLAYER", playerId }),
         Object.freeze({
           commandId: nextServerCommandId("enter"),
@@ -254,6 +380,7 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
               : { initialGrant: { ledgerEntryId: initialGrantId } }),
           }),
         }),
+        hooks,
       );
       lastResult = result;
       if (
@@ -267,13 +394,32 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
     return lastResult;
   }
 
+  async function createIdentityAndEnterSerial(
+    nickname: string,
+    position: EntryPosition,
+  ): Promise<{
+    readonly created: ReturnType<IdentityStore["create"]>;
+    readonly result: CommandExecutionResult;
+  }> {
+    const created = identities.create(nickname);
+    const currentProjection = playerProjection(created.record.playerId);
+    const result = await enterIdentitySerial(
+      created.record.playerId,
+      created.record.nickname,
+      position,
+      position.kind === "SEAT" && hasActiveSession(currentProjection),
+      { identityChangedBeforeExecute: true },
+    );
+    if (result.status === "REJECTED") identities.discardNewIdentity(created.record.playerId);
+    return Object.freeze({ created, result });
+  }
+
   const lifecycle = new LifecycleController({
     runtime,
     scheduler: options.lifecycleScheduler ?? new SystemLifecycleScheduler(),
     executeSystem,
     broadcast: broadcastProjections,
     onSessionEnded() {
-      identities.invalidateSession();
       for (const socket of io.sockets.sockets.values()) {
         socket.data.suppressOffline = true;
         socket.emit(TransportEvent.IdentityRevoked, { reason: "SESSION_ENDED" });
@@ -320,10 +466,12 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
     response.json({ service: "friend-poker", table: "permanent" });
   });
   app.get("/health", (_request, response) => {
-    response.json({ status: "ok" });
+    response.status(persistenceHealthy ? 200 : 503).json({
+      status: persistenceHealthy ? "ok" : "unavailable",
+    });
   });
 
-  app.post("/identity/enter", async (request, response) => {
+  async function handleIdentityEnter(request: Request, response: Response): Promise<void> {
     const body = isRecord(request.body) ? request.body : {};
     const existingCredential = readCookie(request.header("cookie"), cookieName);
     const credentialIdentity = identities.findByCredential(existingCredential);
@@ -339,7 +487,7 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
           } satisfies TransportErrorResponse);
           return;
         }
-        const result = await enterIdentity(
+        const result = await enterIdentitySerial(
           credentialIdentity.playerId,
           credentialIdentity.nickname,
           requestedPosition,
@@ -356,7 +504,6 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
         }
         if (result.status === "APPLIED") {
           broadcastProjections();
-          await lifecycle.reconcile();
         }
       }
       if (existingCredential !== null) {
@@ -400,13 +547,19 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
         return;
       }
       const projection = playerProjection(existingNickname.playerId);
-      const result = await enterIdentity(
+      let reissuedCredential: string | null = null;
+      const result = await enterIdentitySerial(
         existingNickname.playerId,
         existingNickname.nickname,
         requestedPosition,
         requestedPosition.kind === "SEAT" &&
           hasActiveSession(projection) &&
           !playerHasInitialGrant(projection, existingNickname.playerId),
+        {
+          onApplied() {
+            reissuedCredential = identities.reissueAfterKick(existingNickname.playerId).credential;
+          },
+        },
       );
       if (result.status === "REJECTED") {
         response.status(409).json({
@@ -415,33 +568,27 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
         } satisfies TransportErrorResponse);
         return;
       }
-      const reissued = identities.reissueAfterKick(existingNickname.playerId);
+      if (reissuedCredential === null) throw new Error("Kicked identity was not reissued");
       response.setHeader(
         "Set-Cookie",
-        serializeIdentityCookie(reissued.credential, { cookieName, secure: secureCookies }),
+        serializeIdentityCookie(reissuedCredential, { cookieName, secure: secureCookies }),
       );
       response.json({
         status: "REENTERED",
-        playerId: reissued.record.playerId,
-        nickname: reissued.record.nickname,
+        playerId: existingNickname.playerId,
+        nickname: existingNickname.nickname,
       } satisfies IdentityResponse);
       if (result.status === "APPLIED") {
         broadcastProjections();
-        await lifecycle.reconcile();
       }
       return;
     }
 
-    const created = identities.create(nicknameResult.nickname);
-    const projection = playerProjection(created.record.playerId);
-    const result = await enterIdentity(
-      created.record.playerId,
-      created.record.nickname,
+    const { created, result } = await createIdentityAndEnterSerial(
+      nicknameResult.nickname,
       requestedPosition,
-      requestedPosition.kind === "SEAT" && hasActiveSession(projection),
     );
     if (result.status === "REJECTED") {
-      identities.discardNewIdentity(created.record.playerId);
       response.status(409).json({
         error: "ENTRY_REJECTED",
         message: result.message,
@@ -459,8 +606,12 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
     } satisfies IdentityResponse);
     if (result.status === "APPLIED") {
       broadcastProjections();
-      await lifecycle.reconcile();
     }
+  }
+
+  app.post("/identity/enter", async (request, response) => {
+    await enqueueAuthoritative(() => handleIdentityEnter(request, response));
+    await lifecycle.reconcile();
   });
 
   app.use(
@@ -471,9 +622,11 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
       _next: NextFunction,
     ): void => {
       void _next;
-      response.status(400).json({
-        error: "INVALID_HTTP_REQUEST",
-        message: "Request could not be processed",
+      response.status(persistenceHealthy ? 400 : 503).json({
+        error: persistenceHealthy ? "INVALID_HTTP_REQUEST" : "SERVICE_UNAVAILABLE",
+        message: persistenceHealthy
+          ? "Request could not be processed"
+          : "Durable persistence is unavailable",
       } satisfies TransportErrorResponse);
     },
   );
@@ -577,9 +730,12 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
           expectedVersion: inputRecord.expectedVersion,
           command,
         } as CommandEnvelope;
-        const result = await runtime.execute(
+        const result = await executeAuthoritative(
           Object.freeze({ kind: "PLAYER", playerId }),
           envelope,
+          command.type === RuntimeCommandType.Sit
+            ? { sitInitialGrant: command.initialGrant !== undefined }
+            : {},
         );
         acknowledge(result);
         acknowledged = true;
@@ -593,7 +749,6 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
         }
         if (command.type === RuntimeCommandType.Kick) {
           const targetPlayerId = command.targetPlayerId;
-          identities.revokeAfterKick(targetPlayerId);
           const targetSocketId = socketIdByPlayer.get(targetPlayerId);
           if (targetSocketId !== undefined) {
             const targetSocket = io.sockets.sockets.get(targetSocketId);
@@ -651,13 +806,18 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
     async close(): Promise<void> {
       lifecycle.close();
       await new Promise<void>((resolve) => io.close(() => resolve()));
-      if (!httpServer.listening) return;
-      await new Promise<void>((resolve, reject) => {
-        httpServer.close((error) => (error === undefined ? resolve() : reject(error)));
-      });
+      if (httpServer.listening) {
+        await new Promise<void>((resolve, reject) => {
+          httpServer.close((error) => (error === undefined ? resolve() : reject(error)));
+        });
+      }
+      await persistence?.close();
     },
     settleLifecycle(): Promise<void> {
       return lifecycle.settled();
+    },
+    isPersistenceHealthy(): boolean {
+      return persistenceHealthy;
     },
   });
 }
