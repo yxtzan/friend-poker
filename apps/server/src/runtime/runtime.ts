@@ -48,6 +48,7 @@ import type {
   RuntimeOptions,
   RuntimePokerAction,
   RuntimePrincipal,
+  RuntimeProcessedCommandRecord,
   SafeTableProjection,
   TableViewer,
 } from "./types.js";
@@ -198,6 +199,24 @@ export class SingleTableRuntime {
     this.#processedCommandLimit = limit;
     this.#state = options.initialState ?? createTableState();
     this.#version = version;
+    for (const processed of options.initialProcessedCommands ?? []) {
+      if (
+        processed.commandId.length === 0 ||
+        processed.fingerprint.length === 0 ||
+        processed.principalKey.length === 0 ||
+        !Number.isInteger(processed.originalVersion) ||
+        processed.originalVersion < 0
+      ) {
+        throw new TypeError("Initial processed command record is malformed");
+      }
+      this.#remember(processed.commandId, {
+        fingerprint: processed.fingerprint,
+        principalKey: processed.principalKey,
+        originalVersion: processed.originalVersion,
+        originalStatus: processed.originalStatus,
+        data: structuredClone(processed.data),
+      });
+    }
   }
 
   public get version(): number {
@@ -206,6 +225,22 @@ export class SingleTableRuntime {
 
   public getProjection(viewer: TableViewer): SafeTableProjection {
     return projectTableState(this.#state, this.#version, viewer);
+  }
+
+  /** Trusted server-internal checkpoint export. Never expose this through transport APIs. */
+  public exportDurableCheckpointState(): TableState {
+    if (this.#state.activeHand !== null) {
+      throw new Error("Cannot export a durable checkpoint while a hand is in progress");
+    }
+    return structuredClone(this.#state);
+  }
+
+  /** Trusted server-internal idempotency lookup used for atomic durable commits. */
+  public processedCommandRecord(commandId: string): RuntimeProcessedCommandRecord | null {
+    const processed = this.#processedCommands.get(commandId);
+    return processed === undefined
+      ? null
+      : Object.freeze({ commandId, ...structuredClone(processed) });
   }
 
   public execute(

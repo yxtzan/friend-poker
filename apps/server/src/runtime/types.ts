@@ -311,6 +311,16 @@ export interface RuntimeOptions {
   readonly initialState?: TableState;
   readonly initialVersion?: number;
   readonly processedCommandLimit?: number;
+  readonly initialProcessedCommands?: readonly RuntimeProcessedCommandRecord[];
+}
+
+export interface RuntimeProcessedCommandRecord {
+  readonly commandId: string;
+  readonly fingerprint: string;
+  readonly principalKey: string;
+  readonly originalVersion: number;
+  readonly originalStatus: CommandExecutionSuccess["status"];
+  readonly data: RuntimeCommandData;
 }
 
 export type { BettingActionRecord, SafeHandRecord };

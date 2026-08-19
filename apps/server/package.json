@@ -9,13 +9,21 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",
+    "postinstall": "prisma generate --config prisma.config.ts",
+    "prisma:generate": "prisma generate --config prisma.config.ts",
+    "db:migrate:dev": "prisma migrate dev --config prisma.config.ts",
+    "db:migrate:deploy": "prisma migrate deploy --config prisma.config.ts",
+    "db:test:setup": "prisma db push --skip-generate --config prisma.config.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@friend-poker/poker-engine": "0.0.0",
+    "@prisma/client": "6.19.0",
     "express": "^5.2.1",
-    "socket.io": "^4.8.3"
+    "prisma": "6.19.0",
+    "socket.io": "^4.8.3",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

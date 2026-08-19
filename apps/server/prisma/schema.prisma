@@ -1,0 +1,42 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model ApplicationState {
+  id                  Int      @id
+  snapshotSchema      Int
+  runtimeVersion      Int
+  identityGeneration Int
+  snapshotJson        String
+  updatedAt           DateTime @updatedAt
+}
+
+model Identity {
+  playerId         String   @id
+  nickname         String
+  state            String
+  credentialDigest String?  @unique
+  generation       Int
+  updatedAt        DateTime @updatedAt
+
+  @@index([generation, nickname])
+}
+
+model ProcessedCommand {
+  commandId        String   @id
+  principalKey     String
+  fingerprint      String
+  originalVersion Int
+  originalStatus  String
+  dataJson         String
+  sitInitialGrant  Boolean?
+  committedAt      DateTime @default(now())
+
+  @@index([originalVersion])
+}
