@@ -6,6 +6,8 @@ This repository implements the private online Texas Hold'em game defined in `SPE
 
 Before making architectural, behavioral, or rule-related decisions, read `SPEC.md` completely.
 
+For a fresh task, also read `docs/rules-policy.md` and `docs/PROJECT_HANDOFF.md` before changing code.
+
 If implementation behavior conflicts with `SPEC.md`, treat the implementation as wrong unless the specification is explicitly changed.
 
 Do not silently reinterpret, simplify, or omit requirements from `SPEC.md`.
