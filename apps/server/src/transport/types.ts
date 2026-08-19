@@ -1,9 +1,23 @@
 import type { PlayerId, TableSeat } from "@friend-poker/poker-engine";
+import type { RuntimeCommandType } from "../runtime/types.js";
 import type {
   CommandExecutionResult,
   RuntimeCommand,
   SafeTableProjection,
 } from "../runtime/types.js";
+
+export type ClientRuntimeCommand = Exclude<
+  RuntimeCommand,
+  {
+    readonly type:
+      | typeof RuntimeCommandType.EnterTable
+      | typeof RuntimeCommandType.SetOnline
+      | typeof RuntimeCommandType.AdministrativeFold
+      | typeof RuntimeCommandType.AdvanceRunout
+      | typeof RuntimeCommandType.SetLifecycleHost
+      | typeof RuntimeCommandType.AutoEndSession;
+  }
+>;
 
 export const TransportEvent = Object.freeze({
   TableCommand: "TABLE_COMMAND",
@@ -14,7 +28,7 @@ export const TransportEvent = Object.freeze({
 export interface ClientCommandInput {
   readonly commandId: string;
   readonly expectedVersion: number;
-  readonly command: RuntimeCommand;
+  readonly command: ClientRuntimeCommand;
 }
 
 export type EntryPosition =
@@ -34,7 +48,7 @@ export interface TransportErrorResponse {
 
 export interface ServerToClientEvents {
   TABLE_STATE: (projection: SafeTableProjection) => void;
-  IDENTITY_REVOKED: (event: { readonly reason: "KICKED" }) => void;
+  IDENTITY_REVOKED: (event: { readonly reason: "KICKED" | "SESSION_ENDED" }) => void;
 }
 
 export interface ClientToServerEvents {

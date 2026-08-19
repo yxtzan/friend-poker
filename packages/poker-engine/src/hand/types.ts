@@ -35,6 +35,16 @@ export const HoleCardRevealReason = Object.freeze({
 export type HoleCardRevealReason =
   (typeof HoleCardRevealReason)[keyof typeof HoleCardRevealReason];
 
+export const AdministrativeFoldReason = Object.freeze({
+  DisconnectTimeout: "DISCONNECT_TIMEOUT",
+  ExplicitLeave: "EXPLICIT_LEAVE",
+  Kick: "KICK",
+  HostForceFold: "HOST_FORCE_FOLD",
+} as const);
+
+export type AdministrativeFoldReason =
+  (typeof AdministrativeFoldReason)[keyof typeof AdministrativeFoldReason];
+
 export interface StartHandInput {
   readonly handId: string;
   readonly participants: readonly HandParticipantInput[];
@@ -78,11 +88,27 @@ export interface HandSettledEvent {
   readonly reason: HandCompletionReason;
 }
 
+export interface AdministrativeFoldEvent {
+  readonly type: "ADMINISTRATIVE_FOLD";
+  readonly sequence: number;
+  readonly handId: string;
+  readonly targetPlayerId: PlayerId;
+  readonly reason: AdministrativeFoldReason;
+  readonly operatorPlayerId: PlayerId | null;
+}
+
 export type HandEvent =
   | HandActionEvent
+  | AdministrativeFoldEvent
   | BoardRevealEvent
   | HoleCardsRevealEvent
   | HandSettledEvent;
+
+export interface AdministrativeFoldInput {
+  readonly targetPlayerId: PlayerId;
+  readonly reason: AdministrativeFoldReason;
+  readonly operatorPlayerId: PlayerId | null;
+}
 
 /** Internal authoritative state. It contains private cards and must not be serialized publicly. */
 export interface OrchestratedHandState {

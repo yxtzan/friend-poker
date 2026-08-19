@@ -1,4 +1,5 @@
 import type {
+  AdministrativeFoldReason,
   PlayerActionType,
   TableLifecycleStatus,
 } from "@friend-poker/poker-engine";
@@ -30,15 +31,19 @@ export const RuntimeCommandType = Object.freeze({
   StartFirstHand: "START_FIRST_HAND",
   StartNextHand: "START_NEXT_HAND",
   PokerAction: "POKER_ACTION",
+  AdministrativeFold: "ADMINISTRATIVE_FOLD",
+  HostForceFold: "HOST_FORCE_FOLD",
   AdvanceRunout: "ADVANCE_RUNOUT",
   RevealUncontested: "REVEAL_UNCONTESTED",
   Replenish: "REPLENISH",
   HostAdjustChips: "HOST_ADJUST_CHIPS",
   ChangeBlinds: "CHANGE_BLINDS",
   TransferHost: "TRANSFER_HOST",
+  SetLifecycleHost: "SET_LIFECYCLE_HOST",
   Kick: "KICK",
   PrepareEndSession: "PREPARE_END_SESSION",
   EndSession: "END_SESSION",
+  AutoEndSession: "AUTO_END_SESSION",
 } as const);
 
 export type RuntimeCommandType =
@@ -131,6 +136,15 @@ export type RuntimeCommand =
       readonly type: typeof RuntimeCommandType.PokerAction;
       readonly action: RuntimePokerAction;
     }
+  | {
+      readonly type: typeof RuntimeCommandType.AdministrativeFold;
+      readonly targetPlayerId: PlayerId;
+      readonly reason: typeof AdministrativeFoldReason.DisconnectTimeout;
+    }
+  | {
+      readonly type: typeof RuntimeCommandType.HostForceFold;
+      readonly targetPlayerId: PlayerId;
+    }
   | { readonly type: typeof RuntimeCommandType.AdvanceRunout }
   | { readonly type: typeof RuntimeCommandType.RevealUncontested }
   | {
@@ -155,6 +169,10 @@ export type RuntimeCommand =
       readonly targetPlayerId: PlayerId;
     }
   | {
+      readonly type: typeof RuntimeCommandType.SetLifecycleHost;
+      readonly targetPlayerId: PlayerId | null;
+    }
+  | {
       readonly type: typeof RuntimeCommandType.Kick;
       readonly targetPlayerId: PlayerId;
     }
@@ -162,6 +180,10 @@ export type RuntimeCommand =
   | {
       readonly type: typeof RuntimeCommandType.EndSession;
       readonly confirmation: SessionEndPreview;
+      readonly endMetadata?: DomainMetadata;
+    }
+  | {
+      readonly type: typeof RuntimeCommandType.AutoEndSession;
       readonly endMetadata?: DomainMetadata;
     };
 

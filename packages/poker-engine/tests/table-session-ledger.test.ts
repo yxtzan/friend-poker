@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   adjustPlayerChips,
+  autoEndSession,
   calculateNetResult,
   changeBlinds,
   endSession,
@@ -36,12 +37,22 @@ describe("Session lifecycle", () => {
       operatorPlayerId: "A",
       confirmation: prepareEndSession(state, "A"),
     });
+    state = enterTable(state, {
+      playerId: "A2",
+      nickname: "A",
+      position: { kind: "SEAT", seat: 0 },
+    });
+    state = enterTable(state, {
+      playerId: "B2",
+      nickname: "B",
+      position: { kind: "SEAT", seat: 1 },
+    });
     state = startSession(state, {
-      operatorPlayerId: "A",
+      operatorPlayerId: "A2",
       sessionId: "session-2",
       initialGrants: [
-        { playerId: "A", ledgerEntryId: "s2-a" },
-        { playerId: "B", ledgerEntryId: "s2-b" },
+        { playerId: "A2", ledgerEntryId: "s2-a" },
+        { playerId: "B2", ledgerEntryId: "s2-b" },
       ],
     });
 
@@ -58,6 +69,7 @@ describe("Session lifecycle", () => {
       rng(),
     );
     expect(() => prepareEndSession(state, "A")).toThrow(/hand is in progress/u);
+    expect(() => autoEndSession(state)).toThrow(/hand is in progress/u);
     expect(() =>
       endSession(state, {
         operatorPlayerId: "A",
@@ -77,6 +89,25 @@ describe("Session lifecycle", () => {
     });
     expect(state.status).toBe(TableLifecycleStatus.SessionEnded);
     expect(state.recentSessions[0]?.handCount).toBe(1);
+  });
+
+  it("uses the same accounting path for trusted automatic Session end", () => {
+    let state = startedSession();
+    state = replenishPlayer(state, { playerId: "A", ledgerEntryId: "auto-replenish" });
+    state = autoEndSession(state, { endMetadata: { reason: "ALL_OFFLINE_TIMEOUT" } });
+
+    expect(state.status).toBe(TableLifecycleStatus.SessionEnded);
+    expect(state.hostPlayerId).toBeNull();
+    expect(state.players.every((candidate) => !candidate.present && !candidate.online)).toBe(true);
+    expect(state.recentSessions[0]).toMatchObject({
+      sessionId: "session-1",
+      endMetadata: { reason: "ALL_OFFLINE_TIMEOUT" },
+    });
+    expect(state.recentSessions[0]?.players.find(({ playerId }) => playerId === "A")).toMatchObject({
+      replenishments: 100,
+      finalChipBalance: 200,
+      netResult: 0,
+    });
   });
 
   it("rejects a stale end confirmation and records deterministic metadata", () => {
@@ -109,18 +140,28 @@ describe("Session lifecycle", () => {
       operatorPlayerId: "A",
       confirmation: prepareEndSession(state, "A"),
     });
+    state = enterTable(state, {
+      playerId: "A2",
+      position: { kind: "SEAT", seat: 0 },
+    });
+    state = enterTable(state, {
+      playerId: "B2",
+      position: { kind: "SEAT", seat: 1 },
+    });
     state = startSession(state, {
-      operatorPlayerId: "A",
+      operatorPlayerId: "A2",
       sessionId: "new-session",
       initialGrants: [
-        { playerId: "A", ledgerEntryId: "new-a" },
-        { playerId: "B", ledgerEntryId: "new-b" },
+        { playerId: "A2", ledgerEntryId: "new-a" },
+        { playerId: "B2", ledgerEntryId: "new-b" },
       ],
     });
 
     expect(state.session?.ledger).toHaveLength(2);
-    expect(state.players.map(({ chipBalance }) => chipBalance)).toEqual([100, 100]);
-    expect(state.players.every(({ initialGrantReceived }) => initialGrantReceived)).toBe(true);
+    expect(state.players.filter(({ present }) => present).map(({ chipBalance }) => chipBalance)).toEqual([100, 100]);
+    expect(
+      state.players.filter(({ present }) => present).every(({ initialGrantReceived }) => initialGrantReceived),
+    ).toBe(true);
   });
 });
 

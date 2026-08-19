@@ -1,7 +1,9 @@
 import { moveButton } from "../betting/index.js";
 import type { PlayerId } from "../betting/index.js";
 import {
+  AdministrativeFoldReason,
   advanceRunout,
+  administrativelyFoldHandParticipant,
   applyHandAction,
   getHandRecord,
   HandCompletionReason,
@@ -23,7 +25,9 @@ import {
 } from "./types.js";
 import type {
   ActiveSession,
+  AdministrativeFoldTableInput,
   AdjustPlayerChipsInput,
+  AutoEndSessionInput,
   ChangeBlindsInput,
   ChipLedgerEntry,
   DomainMetadata,
@@ -37,6 +41,7 @@ import type {
   SessionEndPreview,
   SessionPlayerSummary,
   SessionSummary,
+  SetLifecycleHostInput,
   SitPlayerInput,
   StartFirstHandInput,
   StartNextHandInput,
@@ -527,7 +532,7 @@ export function leaveTable(state: TableState, playerId: PlayerId): TableState {
       (participant) => participant.playerId === playerId,
     ) ?? false;
   const hostPlayerId = state.hostPlayerId === playerId ? null : state.hostPlayerId;
-  return updatePlayer(
+  let next = updatePlayer(
     freezeState({ ...state, hostPlayerId }),
     playerId,
     (candidate) =>
@@ -546,22 +551,57 @@ export function leaveTable(state: TableState, playerId: PlayerId): TableState {
             pendingLeaveAfterHand: false,
           },
   );
+  const handParticipant = next.activeHand?.bettingState.participants.find(
+    (candidate) => candidate.playerId === playerId,
+  );
+  if (handParticipant !== undefined && !handParticipant.folded) {
+    next = administrativelyFoldTableParticipant(next, {
+      targetPlayerId: playerId,
+      reason: AdministrativeFoldReason.ExplicitLeave,
+      operatorPlayerId: playerId,
+    });
+  }
+  return next;
 }
 
 export function kickPlayer(state: TableState, input: KickPlayerInput): TableState {
   requireHost(state, input.operatorPlayerId);
-  requireNonHandSession(state);
   if (input.targetPlayerId === input.operatorPlayerId) {
     throw new TableDomainError("Host cannot kick themselves");
   }
   requirePresentPlayer(state, input.targetPlayerId);
-  return updatePlayer(state, input.targetPlayerId, (player) => ({
-    ...player,
-    seat: null,
-    present: false,
-    online: false,
-    pendingLeaveAfterHand: false,
-  }));
+  const participating =
+    state.status === TableLifecycleStatus.HandInProgress &&
+    state.activeHand?.bettingState.participants.some(
+      (participant) => participant.playerId === input.targetPlayerId,
+    ) === true;
+  let next = updatePlayer(state, input.targetPlayerId, (player) =>
+    participating
+      ? {
+          ...player,
+          present: false,
+          online: false,
+          pendingLeaveAfterHand: true,
+        }
+      : {
+          ...player,
+          seat: null,
+          present: false,
+          online: false,
+          pendingLeaveAfterHand: false,
+        },
+  );
+  const handParticipant = next.activeHand?.bettingState.participants.find(
+    (participant) => participant.playerId === input.targetPlayerId,
+  );
+  if (handParticipant !== undefined && !handParticipant.folded) {
+    next = administrativelyFoldTableParticipant(next, {
+      targetPlayerId: input.targetPlayerId,
+      reason: AdministrativeFoldReason.Kick,
+      operatorPlayerId: input.operatorPlayerId,
+    });
+  }
+  return next;
 }
 
 export function setPlayerOnline(
@@ -577,6 +617,21 @@ export function transferHost(state: TableState, input: TransferHostInput): Table
   requireHost(state, input.operatorPlayerId);
   requirePresentPlayer(state, input.targetPlayerId);
   return freezeState({ ...state, hostPlayerId: input.targetPlayerId });
+}
+
+/** Trusted lifecycle-only host assignment used after grace/election rules. */
+export function setLifecycleHost(
+  state: TableState,
+  input: SetLifecycleHostInput,
+): TableState {
+  if (input.targetPlayerId === null) {
+    return state.hostPlayerId === null ? state : freezeState({ ...state, hostPlayerId: null });
+  }
+  const target = requirePresentPlayer(state, input.targetPlayerId);
+  if (!target.online) throw new TableDomainError("Lifecycle host must be online");
+  return state.hostPlayerId === target.playerId
+    ? state
+    : freezeState({ ...state, hostPlayerId: target.playerId });
 }
 
 export function startSession(state: TableState, input: StartSessionInput): TableState {
@@ -782,6 +837,19 @@ export function applyTableHandAction(state: TableState, command: HandCommand): T
   return reconcileCompletedHand(state, applyHandAction(state.activeHand, command));
 }
 
+export function administrativelyFoldTableParticipant(
+  state: TableState,
+  input: AdministrativeFoldTableInput,
+): TableState {
+  if (state.status !== TableLifecycleStatus.HandInProgress || state.activeHand === null) {
+    throw new TableDomainError("No active hand is waiting for an administrative Fold");
+  }
+  return reconcileCompletedHand(
+    state,
+    administrativelyFoldHandParticipant(state.activeHand, input),
+  );
+}
+
 export function advanceTableRunout(state: TableState): TableState {
   if (state.status !== TableLifecycleStatus.HandInProgress || state.activeHand === null) {
     throw new TableDomainError("No active hand requires runout advancement");
@@ -856,6 +924,14 @@ export function endSession(state: TableState, input: EndSessionInput): TableStat
   if (!confirmationsMatch(expected, input.confirmation)) {
     throw new TableDomainError("Session end confirmation is stale or does not match");
   }
+  return finalizeSession(state, session, input.endMetadata);
+}
+
+function finalizeSession(
+  state: TableState,
+  session: ActiveSession,
+  endMetadata: DomainMetadata | undefined,
+): TableState {
   const summary = freezeSessionSummary({
     sessionId: session.sessionId,
     participantPlayerIds: session.participantPlayerIds,
@@ -864,13 +940,30 @@ export function endSession(state: TableState, input: EndSessionInput): TableStat
     ),
     handCount: session.completedHandCount,
     startMetadata: session.startMetadata,
-    endMetadata: freezeMetadata(input.endMetadata),
+    endMetadata: freezeMetadata(endMetadata),
   });
   return freezeState({
     ...state,
     status: TableLifecycleStatus.SessionEnded,
+    players: state.players.map((player) => ({
+      ...player,
+      seat: null,
+      present: false,
+      online: false,
+      pendingLeaveAfterHand: false,
+    })),
+    hostPlayerId: null,
     activeHand: null,
     uncontestedRevealOpportunity: null,
     recentSessions: trimToRecent([...state.recentSessions, summary]),
   });
+}
+
+/** Trusted lifecycle-only Session end using the same summary accounting path. */
+export function autoEndSession(
+  state: TableState,
+  input: AutoEndSessionInput = {},
+): TableState {
+  const session = requireNonHandSession(state);
+  return finalizeSession(state, session, input.endMetadata);
 }

@@ -1,4 +1,9 @@
-import type { HandCommand, OrchestratedHandState, SafeHandRecord } from "../hand/index.js";
+import type {
+  AdministrativeFoldReason,
+  HandCommand,
+  OrchestratedHandState,
+  SafeHandRecord,
+} from "../hand/index.js";
 import type { PlayerId, Seat } from "../betting/index.js";
 
 export const TABLE_SEAT_COUNT = 6;
@@ -194,9 +199,23 @@ export interface TransferHostInput {
   readonly targetPlayerId: PlayerId;
 }
 
+export interface SetLifecycleHostInput {
+  readonly targetPlayerId: PlayerId | null;
+}
+
 export interface KickPlayerInput {
   readonly operatorPlayerId: PlayerId;
   readonly targetPlayerId: PlayerId;
+}
+
+export interface AutoEndSessionInput {
+  readonly endMetadata?: DomainMetadata;
+}
+
+export interface AdministrativeFoldTableInput {
+  readonly targetPlayerId: PlayerId;
+  readonly reason: AdministrativeFoldReason;
+  readonly operatorPlayerId: PlayerId | null;
 }
 
 export type { HandCommand, PlayerId, Seat };

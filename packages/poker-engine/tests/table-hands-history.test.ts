@@ -4,7 +4,9 @@ import {
   adjustPlayerChips,
   applyTableHandAction,
   changeBlinds,
+  createTableState,
   endSession,
+  enterTable,
   prepareEndSession,
   PlayerActionType,
   revealTableUncontestedWinner,
@@ -18,7 +20,6 @@ import {
   completeTableHand,
   player,
   rng,
-  seatedTable,
   startedSession,
   totalBalances,
 } from "./table-helpers.js";
@@ -190,21 +191,31 @@ describe("safe hand history", () => {
 
 describe("Session summary history", () => {
   it("keeps the newest 20 summaries independently from hand history", () => {
-    let state = seatedTable();
+    let state = createTableState();
     for (let sessionNumber = 1; sessionNumber <= 21; sessionNumber += 1) {
       const sessionId = `session-${sessionNumber}`;
+      const hostId = `A-${sessionNumber}`;
+      const playerId = `B-${sessionNumber}`;
+      state = enterTable(state, {
+        playerId: hostId,
+        position: { kind: "SEAT", seat: 0 },
+      });
+      state = enterTable(state, {
+        playerId,
+        position: { kind: "SEAT", seat: 1 },
+      });
       state = startSession(state, {
-        operatorPlayerId: "A",
+        operatorPlayerId: hostId,
         sessionId,
         initialGrants: [
-          { playerId: "A", ledgerEntryId: `${sessionId}-a` },
-          { playerId: "B", ledgerEntryId: `${sessionId}-b` },
+          { playerId: hostId, ledgerEntryId: `${sessionId}-a` },
+          { playerId, ledgerEntryId: `${sessionId}-b` },
         ],
         startMetadata: { order: sessionNumber },
       });
       state = endSession(state, {
-        operatorPlayerId: "A",
-        confirmation: prepareEndSession(state, "A"),
+        operatorPlayerId: hostId,
+        confirmation: prepareEndSession(state, hostId),
         endMetadata: { order: sessionNumber },
       });
     }
@@ -213,7 +224,7 @@ describe("Session summary history", () => {
     expect(state.recentSessions.at(-1)?.sessionId).toBe("session-21");
     expect(state.recentSessions.at(-1)?.players).toEqual([
       {
-        playerId: "A",
+        playerId: "A-21",
         initialGrants: 100,
         replenishments: 0,
         hostAdjustments: 0,
@@ -221,7 +232,7 @@ describe("Session summary history", () => {
         netResult: 0,
       },
       {
-        playerId: "B",
+        playerId: "B-21",
         initialGrants: 100,
         replenishments: 0,
         hostAdjustments: 0,

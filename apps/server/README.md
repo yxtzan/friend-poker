@@ -1,6 +1,6 @@
 # Friend Poker server
 
-Milestone 7 provides one permanent Express and Socket.IO table around the
+Milestone 8 provides one permanent Express and Socket.IO table around the
 authoritative `SingleTableRuntime`. It does not provide rooms, a lobby, UI, or
 persistence.
 
@@ -47,3 +47,25 @@ a successfully kicked identity.
 Use `npm run dev --workspace @friend-poker/server` for watch mode or
 `npm start --workspace @friend-poker/server` for the current TypeScript
 bootstrap. Production build and deployment are deferred.
+
+## Lifecycle timing
+
+Milestone 8 owns connection timers through an injectable scheduler. Production defaults are:
+
+- disconnected current actor Fold: 60 seconds;
+- disconnected host transfer: 60 seconds;
+- continuously all-offline Session end: 30 minutes;
+- All-in board Runout: 750ms before each Flop, Turn, and River stage.
+
+Connected players have no normal action clock. Recovery credentials do not expire at 60 seconds;
+they remain valid for the current Session identity lifetime. Ending a Session revokes every old
+credential, clears seats/online/host state, and requires fresh nickname entry with a new identity
+for the next gathering. State and summaries remain in memory only.
+
+Host election prefers online seated players, then online spectators. Within a class, the longest
+continuously online player wins; exact ties use lexical `playerId`. Explicit host leave transfers
+immediately without grace.
+
+All administrative Folds preserve committed chips and write a safe hand-history audit event with
+the reason (`DISCONNECT_TIMEOUT`, `EXPLICIT_LEAVE`, `KICK`, or `HOST_FORCE_FOLD`). Only
+`HOST_FORCE_FOLD` is browser-visible, and it remains host-only and current-actor-only.
