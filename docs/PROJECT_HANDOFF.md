@@ -110,6 +110,7 @@ React + TypeScript + Vite client foundation:
 - own-hole-card-only rendering from the per-viewer projection;
 - centralized versioned command submission for `SIT`, `STAND_TO_SPECTATE`, and `LEAVE_TABLE`;
 - reconnect, disconnect, revocation, stale-version, duplicate, and server-error feedback.
+- `apps/web/DESIGN.md` is the canonical frontend visual-direction reference for M10.5 and later UI work.
 
 The M10 client deliberately does not calculate poker legality, reveal other players' cards, or
 implement action controls, host/admin controls, session controls, history, or deployment.

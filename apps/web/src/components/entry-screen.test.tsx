@@ -29,8 +29,8 @@ describe("EntryScreen", () => {
     const app = appFixture({ phase: "BOOTING" });
     render(<EntryScreen app={app} />);
 
-    expect(screen.getByLabelText("昵称")).toHaveValue("小明");
-    expect(screen.getByLabelText("昵称")).not.toHaveAttribute("maxLength");
+    expect(screen.getByLabelText("你的名字")).toHaveValue("小明");
+    expect(screen.getByLabelText("你的名字")).not.toHaveAttribute("maxLength");
     expect(screen.getAllByRole("button", { name: /座位/ })).toHaveLength(6);
     expect(screen.getByRole("button", { name: "旁观" })).toBeDisabled();
     expect(screen.getByText("正在恢复身份…")).toBeInTheDocument();
@@ -65,7 +65,7 @@ describe("EntryScreen", () => {
 
     render(<StatefulEntryScreen />);
 
-    fireEvent.change(screen.getByLabelText("昵称"), { target: { value: "新朋友" } });
+    fireEvent.change(screen.getByLabelText("你的名字"), { target: { value: "新朋友" } });
     fireEvent.click(screen.getByRole("button", { name: /座位 3/ }));
     const form = screen.getByRole("button", { name: /以「座位 3」进入/ }).closest("form");
     if (form === null) throw new Error("entry form not found");
