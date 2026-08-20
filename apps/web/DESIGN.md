@@ -15,7 +15,7 @@ dock.
 - Gameplay dock: current-viewer actions sit immediately below the felt, expose only server-approved legal actions, and use one compact Raise-to control with Pot quick buttons.
 - Host controls: Session and host-management actions stay in a collapsible secondary rail below presence; destructive actions require an explicit confirmation surface.
 - Secondary surfaces: the static 10-level hand-ranking reference and safe recent hand/Session history use a right-side drawer on desktop and a bottom sheet on narrow screens; they are opened on demand and do not become dashboard cards.
-- Social feedback: six fixed emoji reactions are small, transient, and anchored to a seat when possible; the local “你急了” cooldown feedback is short-lived and never changes table state.
+- Social feedback: six fixed emoji reactions are small, transient, and anchored to a seat when possible; the local “你急了” feedback is a foreground popup that remains until explicit ×/Escape close, while its cooldown lifetime remains independent and never changes table state.
 - Sound and motion: sound is opt-in after an explicit click and consists only of restrained Web Audio cues; turn/street/result/card transitions stay short and disappear under reduced-motion preferences.
 - Street presentation: accepted safe-projection advances reveal only the newly dealt flop, turn, or river cards in a short, non-blocking table overlay; reconnects, stale projections, and already-progressed hands do not replay it.
 - Hand result: the newest completed safe hand stays as a compact in-table result panel until explicitly closed or the next hand starts; it preserves actual main/side-pot payouts, ties, odd chips, and only legally revealed showdown cards.

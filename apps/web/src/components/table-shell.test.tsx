@@ -221,6 +221,92 @@ describe("TableShell", () => {
     spectatorView.unmount();
   });
 
+  it("keeps optional uncontested reveal beside host progression and clears it on the next hand", () => {
+    const onCommand = vi.fn();
+    const hostProjection = projectionFixture({
+      status: "BETWEEN_HANDS",
+      currentHand: null,
+      viewerCanRevealUncontested: true,
+    });
+    const hostView = render(
+      <TableShell
+        projection={hostProjection}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        notice={null}
+        onCommand={onCommand}
+      />,
+    );
+
+    const hostActionDock = screen.getByLabelText("行动区");
+    expect(within(hostActionDock).getByRole("button", { name: "开始下一手" })).toBeInTheDocument();
+    expect(within(hostActionDock).getByRole("button", { name: "亮牌" })).toBeInTheDocument();
+    fireEvent.click(within(hostActionDock).getByRole("button", { name: "开始下一手" }));
+    expect(onCommand).toHaveBeenLastCalledWith({ type: "START_NEXT_HAND" });
+    fireEvent.click(within(hostActionDock).getByRole("button", { name: "亮牌" }));
+    expect(onCommand).toHaveBeenLastCalledWith({ type: "REVEAL_UNCONTESTED" });
+
+    hostView.rerender(
+      <TableShell
+        projection={projectionFixture({ status: "HAND_IN_PROGRESS", viewerCanRevealUncontested: false })}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        notice={null}
+        onCommand={onCommand}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "亮牌" })).not.toBeInTheDocument();
+    hostView.unmount();
+
+    const nonHostProjection = projectionFixture({
+      status: "BETWEEN_HANDS",
+      currentHand: null,
+      hostPlayerId: "bob",
+      viewerCanRevealUncontested: true,
+    });
+    render(
+      <TableShell
+        projection={nonHostProjection}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        notice={null}
+        onCommand={onCommand}
+      />,
+    );
+    const nonHostActionDock = screen.getByLabelText("行动区");
+    expect(within(nonHostActionDock).getByRole("button", { name: "亮牌" })).toBeInTheDocument();
+    expect(within(nonHostActionDock).getByText("等待房主开始下一手")).toBeInTheDocument();
+    expect(within(nonHostActionDock).queryByRole("button", { name: "开始下一手" })).not.toBeInTheDocument();
+  });
+
+  it("shows status-specific waiting copy to non-hosts for every manual progression stage", () => {
+    const cases = [
+      { status: "NO_SESSION" as const, waiting: "等待房主开始本场", start: "开始本场" },
+      { status: "SESSION_WAITING_FOR_FIRST_HAND" as const, waiting: "等待房主开始第一手", start: "开始第一手" },
+      { status: "BETWEEN_HANDS" as const, waiting: "等待房主开始下一手", start: "开始下一手" },
+    ];
+
+    for (const { status, waiting, start } of cases) {
+      const view = render(
+        <TableShell
+          projection={projectionFixture({ status, currentHand: null, hostPlayerId: "bob" })}
+          viewerId="alice"
+          phase="CONNECTED"
+          pendingCommand={null}
+          notice={null}
+          onCommand={vi.fn()}
+        />,
+      );
+      const actionDock = screen.getByLabelText("行动区");
+      expect(within(actionDock).getByText(waiting)).toBeInTheDocument();
+      expect(within(actionDock).queryByRole("button", { name: start })).not.toBeInTheDocument();
+      view.unmount();
+    }
+  });
+
   it("only renders the supplied viewer cards and never invents another player's cards", () => {
     render(
       <TableShell
@@ -492,11 +578,46 @@ describe("TableShell", () => {
     expect(within(result).getByText("边池 1")).toBeInTheDocument();
     expect(within(result).getByText("Alice +25")).toBeInTheDocument();
     expect(within(result).getByText("Bob +15")).toBeInTheDocument();
+    expect(within(result).queryByLabelText("未跟注筹码退回")).not.toBeInTheDocument();
     expect(within(result).getByText("两对")).toBeInTheDocument();
     expect(within(result).getByLabelText("Alice 的公开底牌")).toBeInTheDocument();
     expect(within(result).queryByLabelText("Q♣")).not.toBeInTheDocument();
 
     fireEvent.click(within(result).getByRole("button", { name: "关闭本手结果" }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders authoritative refunds separately from pot winnings", () => {
+    const result = resultFixture();
+    const settlement = result.record.settlement;
+    if (settlement === null) throw new Error("result fixture settlement is required");
+    const resultWithRefund = {
+      ...result,
+      record: {
+        ...result.record,
+        settlement: {
+          ...settlement,
+          refunds: [{ playerId: "bob", amount: 50 }],
+        },
+      },
+    };
+
+    render(
+      <TableShell
+        projection={projectionFixture()}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        notice={null}
+        onCommand={vi.fn()}
+        handResult={resultWithRefund}
+      />,
+    );
+
+    const refunds = screen.getByLabelText("未跟注筹码退回");
+    expect(within(refunds).getByText("Bob")).toBeInTheDocument();
+    expect(within(refunds).getByText("+50")).toBeInTheDocument();
+    expect(screen.getByText("Alice +25")).toBeInTheDocument();
+    expect(screen.getByText("Bob +15")).toBeInTheDocument();
   });
 });

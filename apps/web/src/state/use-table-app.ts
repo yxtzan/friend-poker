@@ -213,17 +213,34 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
       dismissedHandResultKeyRef.current = null;
       setHandResult(null);
       setStreetReveal(null);
-    } else if (!skipPresentation && previous !== null) {
-      const reveal = detectStreetReveal(previous, accepted);
-      if (reveal !== null) setStreetReveal(reveal);
+    } else {
+      const openHandResult = handResultRef.current;
+      if (openHandResult !== null) {
+        const openHandKey = handRecordKey(openHandResult);
+        const refreshedHandResult = accepted.recentHands.find(
+          (candidate) => handRecordKey(candidate) === openHandKey,
+        );
+        if (
+          refreshedHandResult !== undefined &&
+          dismissedHandResultKeyRef.current !== openHandKey
+        ) {
+          handResultRef.current = refreshedHandResult;
+          setHandResult(refreshedHandResult);
+        }
+      }
 
-      const completedHand = detectNewlyCompletedHand(previous, accepted);
-      if (
-        completedHand !== null &&
-        handRecordKey(completedHand) !== dismissedHandResultKeyRef.current
-      ) {
-        handResultRef.current = completedHand;
-        setHandResult(completedHand);
+      if (!skipPresentation && previous !== null) {
+        const reveal = detectStreetReveal(previous, accepted);
+        if (reveal !== null) setStreetReveal(reveal);
+
+        const completedHand = detectNewlyCompletedHand(previous, accepted);
+        if (
+          completedHand !== null &&
+          handRecordKey(completedHand) !== dismissedHandResultKeyRef.current
+        ) {
+          handResultRef.current = completedHand;
+          setHandResult(completedHand);
+        }
       }
     }
 

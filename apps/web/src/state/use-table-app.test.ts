@@ -223,6 +223,67 @@ describe("useTableApp", () => {
     }
   });
 
+  it("refreshes an open result from the same safe hand record after voluntary reveal without reopening after close", async () => {
+    const socket = new FakeSocket();
+    const { result, unmount } = renderHook(() =>
+      useTableApp({
+        restoreIdentity: async () => identity,
+        createSocket: () => socket as unknown as TableSocket,
+      }),
+    );
+    const initial = projectionFixture({ version: 60 });
+    const completed = completedHandFixture();
+    const revealed = {
+      ...completed,
+      record: {
+        ...completed.record,
+        revealedHoleCards: [
+          {
+            playerId: "alice",
+            cards: [{ rank: 14, suit: "s" }, { rank: 13, suit: "h" }] as const,
+            reason: "VOLUNTARY_UNCONTESTED" as const,
+          },
+        ],
+      },
+    };
+    const settled = projectionFixture({ version: 61, recentHands: [completed] });
+    const revealedProjection = projectionFixture({ version: 62, recentHands: [revealed] });
+    const laterRevealUpdate = {
+      ...revealed,
+      record: {
+        ...revealed.record,
+        revealedHoleCards: [
+          ...revealed.record.revealedHoleCards,
+          {
+            playerId: "bob",
+            cards: [{ rank: 9, suit: "c" }, { rank: 8, suit: "d" }] as const,
+            reason: "VOLUNTARY_UNCONTESTED" as const,
+          },
+        ],
+      },
+    };
+    try {
+      await waitFor(() => expect(result.current.phase).toBe("CONNECTING"));
+      act(() => {
+        socket.trigger("connect");
+        socket.trigger(TransportEvent.TableState, initial);
+        socket.trigger(TransportEvent.TableState, settled);
+      });
+      await waitFor(() => expect(result.current.handResult).toBe(completed));
+
+      act(() => socket.trigger(TransportEvent.TableState, revealedProjection));
+      await waitFor(() => expect(result.current.handResult).toBe(revealed));
+      expect(result.current.handResult).toBe(revealed);
+
+      act(() => result.current.closeHandResult());
+      expect(result.current.handResult).toBeNull();
+      act(() => socket.trigger(TransportEvent.TableState, { ...revealedProjection, version: 63, recentHands: [laterRevealUpdate] }));
+      expect(result.current.handResult).toBeNull();
+    } finally {
+      unmount();
+    }
+  });
+
   it("submits presence commands with the current version and adopts stale state", async () => {
     const socket = new FakeSocket();
     const { result } = renderHook(() =>

@@ -129,6 +129,20 @@ export function HandResultPanel({
         ))}
       </div>
 
+      {settlement.refunds.length > 0 && (
+        <div className="hand-result-refunds" aria-label="未跟注筹码退回">
+          <h3>未跟注筹码退回</h3>
+          <ul>
+            {settlement.refunds.map((refund) => (
+              <li key={refund.playerId}>
+                <span>{playerName(projection, record, refund.playerId)}</span>
+                <strong>+{formatChips(refund.amount)}</strong>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="hand-result-total-payouts" aria-label="玩家总收入">
         {positivePayouts.map((payout) => (
           <span key={payout.playerId}>{playerName(projection, record, payout.playerId)} +{formatChips(amountFor(positivePayouts, payout.playerId))}</span>

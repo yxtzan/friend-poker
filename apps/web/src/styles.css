@@ -274,6 +274,11 @@ h1 { margin-bottom: 0; letter-spacing: -0.035em; }
 .hand-result-pot-heading strong { font-variant-numeric: tabular-nums; }
 .hand-result-pot ul { display: grid; gap: 5px; margin: 8px 0 0; padding: 0; list-style: none; color: #b9c7b8; font-size: 0.66rem; }
 .hand-result-pot li strong { color: #d5ead7; font-variant-numeric: tabular-nums; }
+.hand-result-refunds { display: grid; gap: 6px; padding: 8px 10px; border: 1px solid rgba(223, 182, 110, 0.2); border-radius: 5px; color: #d8c28f; background: rgba(67, 49, 23, 0.22); }
+.hand-result-refunds h3 { margin: 0; color: #f0d69e; font-size: 0.72rem; }
+.hand-result-refunds ul { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; font-size: 0.66rem; }
+.hand-result-refunds li { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.hand-result-refunds strong { color: #f4dfad; font-variant-numeric: tabular-nums; }
 .hand-result-total-payouts { display: flex; flex-wrap: wrap; gap: 6px 13px; color: #f0d69e; font-size: 0.67rem; font-variant-numeric: tabular-nums; }
 .hand-result-showdown { display: grid; gap: 8px; padding-top: 2px; }
 .hand-result-showdown h3 { margin: 0; color: #dbe7d9; font-size: 0.72rem; }

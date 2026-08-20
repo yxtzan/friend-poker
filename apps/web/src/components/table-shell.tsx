@@ -456,31 +456,41 @@ function ActionDock({
   }, [amountMode, hand, legal]);
 
   if (!isTurn || legal === null) {
+    if (progression !== null) {
+      return (
+        <section className="action-dock action-dock-waiting" aria-label="行动区">
+          <span className="action-dock-label">本场流程</span>
+          {isHost ? (
+            <>
+              <button
+                type="button"
+                className="primary-button session-primary-action"
+                disabled={disabled}
+                onClick={() => onCommand({ type: progression.command })}
+              >
+                {pendingCommand === progression.command ? `${progression.hostLabel}中…` : progression.hostLabel}
+              </button>
+              {projection.viewerCanRevealUncontested && (
+                <button type="button" className="secondary-button" disabled={disabled} onClick={() => onCommand({ type: M11CommandType.RevealUncontested })}>亮牌</button>
+              )}
+            </>
+          ) : projection.viewerCanRevealUncontested ? (
+            <>
+              <button type="button" className="secondary-button" disabled={disabled} onClick={() => onCommand({ type: M11CommandType.RevealUncontested })}>亮牌</button>
+              <span className="action-dock-status">{progression.waitingLabel}</span>
+            </>
+          ) : (
+            <span className="action-dock-status">{progression.waitingLabel}</span>
+          )}
+        </section>
+      );
+    }
     if (projection.viewerCanRevealUncontested) {
       return (
         <section className="action-dock action-dock-waiting" aria-label="行动区">
           <span className="action-dock-label">本手获胜</span>
           <button type="button" className="secondary-button" disabled={disabled} onClick={() => onCommand({ type: M11CommandType.RevealUncontested })}>亮牌</button>
           <span className="action-dock-status">两张底牌会进入本手记录</span>
-        </section>
-      );
-    }
-    if (progression !== null) {
-      return (
-        <section className="action-dock action-dock-waiting" aria-label="行动区">
-          <span className="action-dock-label">本场流程</span>
-          {isHost ? (
-            <button
-              type="button"
-              className="primary-button session-primary-action"
-              disabled={disabled}
-              onClick={() => onCommand({ type: progression.command })}
-            >
-              {pendingCommand === progression.command ? `${progression.hostLabel}中…` : progression.hostLabel}
-            </button>
-          ) : (
-            <span className="action-dock-status">{progression.waitingLabel}</span>
-          )}
         </section>
       );
     }

@@ -351,12 +351,12 @@ not technical debt to “fix” casually by persisting decks or private hole car
 
 ## 12. Current test baseline
 
-Verified on the M12 implementation snapshot based on branch
-`agent/milestone-12-product-completion` and baseline `main@bc64ee3`:
+Verified on the M13 implementation snapshot based on branch
+`feature/street-reveal-hand-result` and baseline `main@b9a216a`:
 
-- standard suite: **404 tests** total;
+- standard suite: **408 tests** total;
 - `apps/server`: **110 tests** across 13 test files;
-- `apps/web`: **45 tests** across 11 test files;
+- `apps/web`: **49 tests** across 11 test files;
 - `packages/poker-engine`: **249 tests** across 28 test files;
 - exhaustive evaluator suite: **1 additional exhaustive test**;
 - CI migration smoke step, `npm run db:migrate:deploy --workspace @friend-poker/server`, remains
@@ -395,8 +395,8 @@ V1 intentionally has no PostgreSQL, Redis, distributed lock, or horizontal scali
 one replica would require a deliberate redesign of database concurrency, command ordering,
 Socket.IO coordination, lifecycle ownership, and deployment policy.
 
-See `docs/DEPLOYMENT_READINESS.md` for the M12 pre-deploy checklist. No production deployment
-was run.
+See `docs/DEPLOYMENT_READINESS.md` for the M12 deployment checklist. The approved V1/M12
+baseline is deployed to Railway; the current M13 branch and PR #15 have not been deployed.
 
 ## 14. Deliberate non-goals
 
@@ -413,8 +413,8 @@ V1 excludes:
 
 ## 15. Known limitations after M12
 
-- Railway configuration is documented and locally checked, but production deployment has not
-  been performed by repository work.
+- The approved V1/M12 baseline is deployed to Railway; the current M13 branch and PR #15 have
+  not been deployed.
 - The local acceptance environment used Node 24 despite the repository's required Node 22 range;
   deployment must use Node 22.x and CI remains the authoritative environment check.
 - Persistence is deliberately constrained to SQLite and one process/replica.
