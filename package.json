@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "lint": "eslint .",
+    "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "test:exhaustive": "npm run test:exhaustive --workspace @friend-poker/poker-engine",
     "typecheck": "npm run typecheck --workspaces --if-present"
