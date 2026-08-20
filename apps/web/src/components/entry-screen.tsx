@@ -54,7 +54,6 @@ export function EntryScreen({ app }: EntryScreenProps) {
             value={app.nickname}
             onChange={(event) => app.setNickname(event.target.value)}
             placeholder="例如：小明"
-            maxLength={12}
             autoComplete="nickname"
             disabled={isBusy}
           />

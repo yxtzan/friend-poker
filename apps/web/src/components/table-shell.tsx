@@ -113,7 +113,11 @@ export function TableShell({
             <div className="board" aria-label="公共牌">
               {[0, 1, 2, 3, 4].map((index) => (
                 <span className="board-slot" key={index}>
-                  <PlayingCard card={hand?.board[index] ?? null} compact={hand?.board[index] === undefined} />
+                  <PlayingCard
+                    card={hand?.board[index] ?? null}
+                    empty={hand?.board[index] === undefined}
+                    compact={hand?.board[index] === undefined}
+                  />
                 </span>
               ))}
             </div>

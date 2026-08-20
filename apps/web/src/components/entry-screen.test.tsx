@@ -30,6 +30,7 @@ describe("EntryScreen", () => {
     render(<EntryScreen app={app} />);
 
     expect(screen.getByLabelText("昵称")).toHaveValue("小明");
+    expect(screen.getByLabelText("昵称")).not.toHaveAttribute("maxLength");
     expect(screen.getAllByRole("button", { name: /座位/ })).toHaveLength(6);
     expect(screen.getByRole("button", { name: "旁观" })).toBeDisabled();
     expect(screen.getByText("正在恢复身份…")).toBeInTheDocument();

@@ -20,6 +20,21 @@ export function createCommandId(): string {
 export interface CommandClientOptions {
   readonly getProjection: () => SafeTableProjection | null;
   readonly acceptProjection: (projection: SafeTableProjection) => void;
+  readonly ackTimeoutMs?: number;
+}
+
+export const DEFAULT_COMMAND_ACK_TIMEOUT_MS = 10_000;
+
+export class CommandAcknowledgementTimeoutError extends Error {
+  public readonly commandId: string;
+  public readonly timeoutMs: number;
+
+  public constructor(commandId: string, timeoutMs: number) {
+    super(`服务器确认命令 ${commandId} 超时（${timeoutMs}ms）`);
+    this.name = "CommandAcknowledgementTimeoutError";
+    this.commandId = commandId;
+    this.timeoutMs = timeoutMs;
+  }
 }
 
 /**
@@ -30,11 +45,17 @@ export class TableCommandClient {
   readonly #socket: TableSocket;
   readonly #getProjection: CommandClientOptions["getProjection"];
   readonly #acceptProjection: CommandClientOptions["acceptProjection"];
+  readonly #ackTimeoutMs: number;
 
   public constructor(socket: TableSocket, options: CommandClientOptions) {
     this.#socket = socket;
     this.#getProjection = options.getProjection;
     this.#acceptProjection = options.acceptProjection;
+    const ackTimeoutMs = options.ackTimeoutMs ?? DEFAULT_COMMAND_ACK_TIMEOUT_MS;
+    if (!Number.isFinite(ackTimeoutMs) || ackTimeoutMs <= 0) {
+      throw new RangeError("ackTimeoutMs must be a finite positive number");
+    }
+    this.#ackTimeoutMs = ackTimeoutMs;
   }
 
   public submit(command: M10Command): Promise<CommandResult> {
@@ -47,11 +68,30 @@ export class TableCommandClient {
       expectedVersion: projection.version,
       command,
     });
-    return new Promise((resolve) => {
-      this.#socket.emit(TransportEvent.TableCommand, input, (result) => {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timeoutId = setTimeout(() => {
+        settled = true;
+        reject(new CommandAcknowledgementTimeoutError(input.commandId, this.#ackTimeoutMs));
+      }, this.#ackTimeoutMs);
+      const acknowledge = (result: CommandResult): void => {
+        // A late ACK may prove that the server applied the command after the
+        // client timed out. It is still authoritative, and version filtering
+        // belongs to the projection consumer.
         this.#acceptProjection(result.projection);
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
         resolve(result);
-      });
+      };
+      try {
+        this.#socket.emit(TransportEvent.TableCommand, input, acknowledge);
+      } catch (error) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        reject(error);
+      }
     });
   }
 }

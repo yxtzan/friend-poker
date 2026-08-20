@@ -26,10 +26,21 @@ const SUIT_SYMBOLS: Record<Card["suit"], string> = {
 export interface PlayingCardProps {
   readonly card: Card | null;
   readonly hidden?: boolean;
+  readonly empty?: boolean;
   readonly compact?: boolean;
 }
 
-export function PlayingCard({ card, hidden = false, compact = false }: PlayingCardProps) {
+export function PlayingCard({ card, hidden = false, empty = false, compact = false }: PlayingCardProps) {
+  if (empty) {
+    return (
+      <span
+        className={`playing-card card-empty${compact ? " card-compact" : ""}`}
+        aria-label="尚未发出的公共牌"
+      >
+        <span aria-hidden="true">·</span>
+      </span>
+    );
+  }
   if (hidden || card === null) {
     return (
       <span className={`playing-card card-back${compact ? " card-compact" : ""}`} aria-label="隐藏底牌">

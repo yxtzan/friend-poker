@@ -20,9 +20,9 @@
   "dependencies": {
     "@friend-poker/poker-engine": "0.0.0",
     "@friend-poker/shared": "0.0.0",
-    "@prisma/client": "6.19.0",
+    "@prisma/client": "6.19.3",
     "express": "^5.2.1",
-    "prisma": "6.19.0",
+    "prisma": "6.19.3",
     "socket.io": "^4.8.3",
     "zod": "^4.1.12"
   },

@@ -81,6 +81,7 @@ h1 { margin-bottom: 0; letter-spacing: -0.04em; }
 .card-red { color: #bd3d42; }
 .card-black { color: #17211e; }
 .card-back { border-color: rgba(238, 255, 245, 0.3); color: rgba(238, 255, 245, 0.48); background: repeating-linear-gradient(45deg, #1d4a3b, #1d4a3b 4px, #2c6952 4px, #2c6952 8px); }
+.card-empty { border-color: transparent; color: rgba(238, 255, 245, 0.35); background: transparent; box-shadow: none; }
 
 .seat-anchor { position: absolute; z-index: 2; width: clamp(138px, 18vw, 204px); }
 .seat-anchor-0 { top: 1%; left: 20%; transform: translateX(-50%); }

@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CommandResult } from "@friend-poker/shared";
-import { TableCommandClient } from "./commands.js";
+import {
+  CommandAcknowledgementTimeoutError,
+  TableCommandClient,
+} from "./commands.js";
 import type { TableSocket } from "./socket.js";
 import { projectionFixture } from "../test/fixtures.js";
 
@@ -78,5 +81,31 @@ describe("TableCommandClient", () => {
     expect(emit).toHaveBeenCalledTimes(2);
     expect(acceptProjection).toHaveBeenCalledTimes(2);
     expect(acceptProjection).toHaveBeenLastCalledWith(fresh);
+  });
+
+  it("rejects after an ACK timeout without retrying or mutating projection state", async () => {
+    vi.useFakeTimers();
+    try {
+      const projection = projectionFixture();
+      const emit = vi.fn();
+      const socket = { emit } as unknown as TableSocket;
+      const acceptProjection = vi.fn();
+      const client = new TableCommandClient(socket, {
+        getProjection: () => projection,
+        acceptProjection,
+        ackTimeoutMs: 50,
+      });
+
+      const submission = client.submit({ type: "SIT", seat: 1 });
+      const rejection = expect(submission).rejects.toBeInstanceOf(CommandAcknowledgementTimeoutError);
+      expect(emit).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(50);
+
+      await rejection;
+      expect(emit).toHaveBeenCalledTimes(1);
+      expect(acceptProjection).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

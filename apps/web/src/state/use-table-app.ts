@@ -13,7 +13,10 @@ import {
   IdentityApiError,
   validateNicknameForEntry,
 } from "../api/identity.js";
-import { TableCommandClient } from "../api/commands.js";
+import {
+  CommandAcknowledgementTimeoutError,
+  TableCommandClient,
+} from "../api/commands.js";
 import { connectToTable, type TableSocket } from "../api/socket.js";
 import { acceptProjection, commandErrorMessage, identityErrorMessage } from "./projection.js";
 import { TransportEvent } from "@friend-poker/shared";
@@ -33,6 +36,7 @@ export interface TableAppOptions {
   readonly restoreIdentity?: () => Promise<IdentityResponse | null>;
   readonly enterIdentity?: (input: IdentityEntryInput) => Promise<IdentityResponse>;
   readonly createSocket?: () => TableSocket;
+  readonly commandAckTimeoutMs?: number;
 }
 
 export interface TableAppState {
@@ -97,9 +101,11 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
   const restoreRef = useRef(restore);
   const enterRef = useRef(enter);
   const createSocketRef = useRef(createSocket);
+  const commandAckTimeoutRef = useRef(options.commandAckTimeoutMs);
   restoreRef.current = restore;
   enterRef.current = enter;
   createSocketRef.current = createSocket;
+  commandAckTimeoutRef.current = options.commandAckTimeoutMs;
 
   const acceptAuthoritativeProjection = useCallback((next: SafeTableProjection): void => {
     setProjection((previous) => {
@@ -118,6 +124,9 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
       commandClientRef.current = new TableCommandClient(socket, {
         getProjection: () => projectionRef.current,
         acceptProjection: acceptAuthoritativeProjection,
+        ...(commandAckTimeoutRef.current === undefined
+          ? {}
+          : { ackTimeoutMs: commandAckTimeoutRef.current }),
       });
       setIdentity(nextIdentity);
       setPhase("CONNECTING");
@@ -247,8 +256,12 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
         setNotice("你已离开牌桌；再次选择位置即可重新进入");
       }
       return result;
-    } catch {
-      setNotice("操作未能送达服务器，请检查连接");
+    } catch (error) {
+      if (error instanceof CommandAcknowledgementTimeoutError) {
+        setNotice("操作确认超时，服务器可能已经处理；请以最新牌桌状态为准");
+      } else {
+        setNotice("操作未能送达服务器，请检查连接");
+      }
       return null;
     } finally {
       setPendingCommand(null);

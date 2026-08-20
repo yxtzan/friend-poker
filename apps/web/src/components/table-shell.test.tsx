@@ -50,6 +50,29 @@ describe("TableShell", () => {
     expect(screen.getByText("你的手牌")).toBeInTheDocument();
   });
 
+  it("renders undealt community cards as empty board slots, not hidden cards", () => {
+    const projection = projectionFixture();
+    const currentHand = projection.currentHand;
+    if (currentHand === null) throw new Error("current hand fixture is required");
+
+    render(
+      <TableShell
+        projection={{
+          ...projection,
+          currentHand: { ...currentHand, street: "PREFLOP", board: [] },
+        }}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        notice={null}
+        onCommand={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByLabelText("隐藏底牌")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("尚未发出的公共牌")).toHaveLength(5);
+  });
+
   it("sends SIT only after an empty seat is clicked", () => {
     const onCommand = vi.fn();
     render(
