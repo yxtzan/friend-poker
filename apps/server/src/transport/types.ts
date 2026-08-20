@@ -2,38 +2,15 @@ import type { PlayerId } from "@friend-poker/poker-engine";
 import type {
   EntryPosition as SharedEntryPosition,
   IdentityResponse as SharedIdentityResponse,
-  M11Command as BrowserCommand,
+  M11ClientCommandInput as SharedM11ClientCommandInput,
   ServerToClientEvents as SharedServerToClientEvents,
   TransportErrorResponse as SharedTransportErrorResponse,
 } from "@friend-poker/shared";
 export { TransportEvent } from "@friend-poker/shared";
-import type { RuntimeCommandType } from "../runtime/types.js";
-import type { CommandExecutionResult, RuntimeCommand } from "../runtime/types.js";
+import type { CommandExecutionResult } from "../runtime/types.js";
 
-export type ClientRuntimeCommand = Exclude<
-  RuntimeCommand,
-  {
-    readonly type:
-      | typeof RuntimeCommandType.EnterTable
-      | typeof RuntimeCommandType.SetOnline
-      | typeof RuntimeCommandType.AdministrativeFold
-      | typeof RuntimeCommandType.AdvanceRunout
-      | typeof RuntimeCommandType.SetLifecycleHost
-      | typeof RuntimeCommandType.AutoEndSession;
-  }
->;
-
-/**
- * The browser uses BrowserCommand. ClientRuntimeCommand remains available to
- * the in-process transport tests; the public web client never imports it.
- */
-export type ClientCommand = ClientRuntimeCommand | BrowserCommand;
-
-export interface ClientCommandInput {
-  readonly commandId: string;
-  readonly expectedVersion: number;
-  readonly command: ClientCommand;
-}
+/** The only command envelope exposed by the browser-facing Socket.IO contract. */
+export type ClientCommandInput = SharedM11ClientCommandInput;
 
 export type EntryPosition = SharedEntryPosition;
 export type IdentityResponse = SharedIdentityResponse;

@@ -204,7 +204,7 @@ export async function createConnectedClient(
 
 export function executeSocketCommand(
   socket: TestSocket,
-  input: ClientCommandInput | unknown,
+  input: unknown,
 ): Promise<CommandExecutionResult> {
   return new Promise((resolve) => {
     socket.emit(
@@ -236,10 +236,10 @@ export async function expectConnectionError(
 export function nextCommand(
   projection: SafeTableProjection,
   commandId: string,
-  command: ClientCommandInput["command"],
+  command: unknown,
 ): ClientCommandInput {
   const raw = command as unknown as Record<string, unknown>;
-  let browserCommand: ClientCommandInput["command"] = command;
+  let browserCommand: ClientCommandInput["command"];
   switch (raw.type) {
     case "START_SESSION":
       browserCommand = { type: "START_SESSION" };
@@ -277,6 +277,9 @@ export function nextCommand(
       break;
     case "END_SESSION":
       browserCommand = { type: "END_SESSION", confirmation: raw.confirmation as never };
+      break;
+    default:
+      browserCommand = raw as ClientCommandInput["command"];
       break;
   }
   return Object.freeze({ commandId, expectedVersion: projection.version, command: browserCommand });
