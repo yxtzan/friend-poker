@@ -1,11 +1,11 @@
 # Friend Poker Project Handoff
 
-Canonical fast-recovery reference for the repository state after the Milestone 12 product
-completion implementation.
+Canonical fast-recovery reference for the repository state after the Milestone 13
+street-reveal and hand-result presentation implementation.
 
-- Verified main baseline before M12: `bc64ee3 Implement Milestone 11 playable controls`
-- Last repository verification: 2026-08-20
-- M12 working branch: `agent/milestone-12-product-completion`
+- Verified main baseline before M13: `b9a216a Implement Milestone 12 product completion`
+- Last repository verification: 2026-08-21
+- M13 working branch: `feature/street-reveal-hand-result`
 - Next major phase: a new approved milestone after Draft PR review; do not infer scope here
 
 This file describes the current implementation snapshot, not an intermediate milestone or a
@@ -119,7 +119,13 @@ React + TypeScript + Vite client foundation:
   host chip adjustments, host transfer, kick, host force-Fold, and preview-confirmed Session end;
 - static hand-ranking reference, safe recent hand history, retained Session summaries, six fixed
   transient emoji reactions with server rate limiting, opt-in sound cues, lightweight state
-  motion, and responsive/accessibility polish;
+  motion, responsive/accessibility polish, and selective text-selection hardening;
+- consecutive safe-projection flop/turn/river reveal presentation and a persistent safe hand
+  result panel that reads actual main/side-pot payouts, ties, odd chips, and legally revealed
+  showdown details without client-side winner calculation;
+- the main Action Dock is the sole location for manual host Session progression (`START_SESSION`,
+  `START_FIRST_HAND`, `START_NEXT_HAND`); non-hosts receive status-specific waiting copy, and
+  host identity is matched by `hostPlayerId === viewerId`;
 - reconnect, disconnect, revocation, stale-version, duplicate, and server-error feedback.
 - `apps/web/DESIGN.md` is the canonical frontend visual-direction reference for M10.5 and later UI work.
 
@@ -143,9 +149,10 @@ authenticated socket identity before invoking the runtime.
 | M10 | Web foundation | IMPLEMENTED | Browser entry/recovery shell, safe shared contracts, six-seat public table projection, and presence commands |
 | M11 | Fully playable game controls and host/session controls | IMPLEMENTED | Viewer-scoped legal actions, intent-only browser commands, playable betting UI, Session flow, replenishment, host controls, and acknowledgement-loss retry |
 | M12 | Product completion and acceptance | IMPLEMENTED | Hand-ranking reference, safe history/Session summaries, reactions, opt-in sound, reduced-motion polish, initial TABLE_STATE command reconciliation, responsive/accessibility QA, and deployment readiness |
+| M13 | Street reveal and hand-result presentation | IMPLEMENTED | Consecutive safe-projection community-card reveal overlay, persistent authoritative multi-pot hand result, legally scoped showdown details, and selective interaction-text-selection hardening |
 
 Merged main milestones through M9 are visible in Git history from `cdf71e0` through `de44515`.
-M10 through M12 are implemented in the current snapshot. Production deployment remains
+M10 through M13 are implemented in the current snapshot. Production deployment remains
 intentionally unperformed.
 
 ## 5. Critical invariants
@@ -347,9 +354,9 @@ not technical debt to “fix” casually by persisting decks or private hole car
 Verified on the M12 implementation snapshot based on branch
 `agent/milestone-12-product-completion` and baseline `main@bc64ee3`:
 
-- standard suite: **394 tests** total;
+- standard suite: **404 tests** total;
 - `apps/server`: **110 tests** across 13 test files;
-- `apps/web`: **35 tests** across 10 test files;
+- `apps/web`: **45 tests** across 11 test files;
 - `packages/poker-engine`: **249 tests** across 28 test files;
 - exhaustive evaluator suite: **1 additional exhaustive test**;
 - CI migration smoke step, `npm run db:migrate:deploy --workspace @friend-poker/server`, remains
