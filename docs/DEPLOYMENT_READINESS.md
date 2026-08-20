@@ -13,12 +13,32 @@ M12 documents the production shape but does not deploy it.
 - `ALLOWED_ORIGINS` set to the exact deployed frontend origin; never `*`.
 - Health check: `/health`.
 
-Run the migration only after the Volume is mounted, then start the server:
+The server process serves both the built Vite Web client and the Express/Socket.IO
+backend from the same public origin. The browser therefore keeps using relative
+`/identity/*` and `/socket.io/*` endpoints; no separate frontend service is required.
+
+Build the Web client before starting the production server:
+
+BUILD:
+
+```sh
+npm ci
+npm run build
+```
+
+After the Volume is mounted at `/data`, run the migration and start the server:
+
+RUNTIME:
 
 ```sh
 npm run db:migrate:deploy --workspace @friend-poker/server
 npm start --workspace @friend-poker/server
 ```
+
+`npm start --workspace @friend-poker/server` fails clearly if the generated
+`apps/web/dist/index.html` is missing. The production server serves `/` from that
+build, serves its static assets, preserves `/health`, `/identity/*`, and
+`/socket.io/*`, and applies SPA fallback only to non-server browser routes.
 
 The SQLite file must live on the Volume. Do not migrate during image build,
 commit runtime databases, or run more than one replica without an approved

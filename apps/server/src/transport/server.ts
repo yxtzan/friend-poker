@@ -1,6 +1,9 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import express from "express";
 import type { NextFunction, Request, Response } from "express";
@@ -53,6 +56,9 @@ import type {
 } from "./types.js";
 
 const SYSTEM_ID = "transport-lifecycle";
+const DEFAULT_WEB_DIST_PATH = fileURLToPath(
+  new URL("../../../../apps/web/dist/", import.meta.url),
+);
 
 type PokerSocket = Socket<
   ClientToServerEvents,
@@ -81,6 +87,12 @@ export interface PokerServerOptions extends IdentityStoreOptions {
   readonly hostDisconnectGraceMs?: number;
   readonly allOfflineTimeoutMs?: number;
   readonly runoutStageDelayMs?: number;
+  /** Repository-relative Vite output directory, primarily for production and tests. */
+  readonly webDistPath?: string;
+  /** Require the generated Web build before constructing the server. */
+  readonly requireWebBuild?: boolean;
+  /** Injectable clock for deterministic reaction-limit tests. */
+  readonly reactionClock?: () => number;
 }
 
 export interface ListenOptions {
@@ -315,6 +327,16 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
   const cookieName = options.cookieName ?? DEFAULT_IDENTITY_COOKIE_NAME;
   const secureCookies = options.secureCookies ?? process.env.NODE_ENV === "production";
   const allowedOrigins = new Set(options.allowedOrigins ?? ["http://localhost:5173"]);
+  const webDistPath = options.webDistPath ?? DEFAULT_WEB_DIST_PATH;
+  const shouldServeWeb = options.webDistPath !== undefined || process.env.NODE_ENV === "production";
+  const requireWebBuild = options.requireWebBuild ?? shouldServeWeb;
+  const webIndexPath = join(webDistPath, "index.html");
+  if (requireWebBuild && !existsSync(webIndexPath)) {
+    throw new Error(
+      `Production Web build is missing at ${webIndexPath}; run npm run build before starting the server`,
+    );
+  }
+  const webBuildAvailable = shouldServeWeb && existsSync(webIndexPath);
   const app = express();
   const httpServer = createServer(app);
   const io = new SocketIOServer<
@@ -335,7 +357,9 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
     },
   });
   const socketIdByPlayer = new Map<PlayerId, string>();
-  const reactionRateLimiter = new ReactionRateLimiter();
+  const reactionRateLimiter = new ReactionRateLimiter(
+    options.reactionClock === undefined ? {} : { now: options.reactionClock },
+  );
   const clientSitInitialGrants = new ClientSitInitialGrantRegistry();
   clientSitInitialGrants.seed(options.initialSitInitialGrantCommands ?? []);
   let persistenceHealthy = true;
@@ -599,6 +623,7 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
         socket.disconnect(true);
       }
       socketIdByPlayer.clear();
+      reactionRateLimiter.clearAll();
     },
     ...(options.disconnectedTurnTimeoutMs === undefined
       ? {}
@@ -635,9 +660,6 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
   });
   app.use(express.json({ limit: "8kb" }));
 
-  app.get("/", (_request, response) => {
-    response.json({ service: "friend-poker", table: "permanent" });
-  });
   app.get("/health", (_request, response) => {
     response.status(persistenceHealthy ? 200 : 503).json({
       status: persistenceHealthy ? "ok" : "unavailable",
@@ -786,6 +808,37 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
     await enqueueAuthoritative(() => handleIdentityEnter(request, response));
     await lifecycle.reconcile();
   });
+
+  if (webBuildAvailable) {
+    app.use(express.static(webDistPath, { index: false }));
+    app.get("/", (_request, response) => {
+      response.sendFile(webIndexPath);
+    });
+    app.use((request, response, next) => {
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        next();
+        return;
+      }
+      const requestPath = request.path;
+      const isServerRoute =
+        requestPath === "/health" ||
+        requestPath === "/identity" ||
+        requestPath.startsWith("/identity/") ||
+        requestPath === "/socket.io" ||
+        requestPath.startsWith("/socket.io/");
+      if (isServerRoute || requestPath.includes(".")) {
+        next();
+        return;
+      }
+      response.sendFile(webIndexPath, (error) => {
+        if (error !== undefined) next(error);
+      });
+    });
+  } else {
+    app.get("/", (_request, response) => {
+      response.json({ service: "friend-poker", table: "permanent" });
+    });
+  }
 
   app.use(
     (
@@ -966,7 +1019,6 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
     socket.on("disconnect", () => {
       if (socketIdByPlayer.get(playerId) !== socket.id) return;
       socketIdByPlayer.delete(playerId);
-      reactionRateLimiter.clear(playerId);
       if (socket.data.suppressOffline === true) return;
       void executeSystem({
         type: RuntimeCommandType.SetOnline,

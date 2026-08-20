@@ -3,7 +3,7 @@
 Canonical fast-recovery reference for the repository state after the Milestone 12 product
 completion implementation.
 
-- Verified main baseline before M11: `bc64ee3 Implement Milestone 11 playable controls`
+- Verified main baseline before M12: `bc64ee3 Implement Milestone 11 playable controls`
 - Last repository verification: 2026-08-20
 - M12 working branch: `agent/milestone-12-product-completion`
 - Next major phase: a new approved milestone after Draft PR review; do not infer scope here
@@ -347,8 +347,8 @@ not technical debt to “fix” casually by persisting decks or private hole car
 Verified on the M12 implementation snapshot based on branch
 `agent/milestone-12-product-completion` and baseline `main@bc64ee3`:
 
-- standard suite: **384 tests** total;
-- `apps/server`: **106 tests** across 11 test files;
+- standard suite: **388 tests** total;
+- `apps/server`: **110 tests** across 13 test files;
 - `apps/web`: **29 tests** across 9 test files;
 - `packages/poker-engine`: **249 tests** across 28 test files;
 - exhaustive evaluator suite: **1 additional exhaustive test**;

@@ -8,11 +8,20 @@ interface ReactionWindow {
   cooldownUntil: number;
 }
 
+export interface ReactionRateLimiterOptions {
+  readonly now?: () => number;
+}
+
 /** Server-side spam guard for the fixed, non-persistent reaction channel. */
 export class ReactionRateLimiter {
   readonly #windows = new Map<string, ReactionWindow>();
+  readonly #now: () => number;
 
-  public tryAccept(playerId: string, now = Date.now()): boolean {
+  public constructor(options: ReactionRateLimiterOptions = {}) {
+    this.#now = options.now ?? (() => Date.now());
+  }
+
+  public tryAccept(playerId: string, now = this.#now()): boolean {
     const window = this.#windows.get(playerId) ?? { timestamps: [], cooldownUntil: 0 };
     window.timestamps = window.timestamps.filter(
       (timestamp) => timestamp > now - REACTION_WINDOW_MS,
@@ -33,5 +42,9 @@ export class ReactionRateLimiter {
 
   public clear(playerId: string): void {
     this.#windows.delete(playerId);
+  }
+
+  public clearAll(): void {
+    this.#windows.clear();
   }
 }
