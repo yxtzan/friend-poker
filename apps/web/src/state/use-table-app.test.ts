@@ -282,7 +282,7 @@ describe("useTableApp", () => {
       expect(socket.emittedReactions).toHaveLength(4);
       expect(result.current.reactionEggVisible).toBe(true);
 
-      act(() => vi.advanceTimersByTime(1_500));
+      act(() => vi.advanceTimersByTime(500));
       expect(result.current.reactionEggVisible).toBe(true);
 
       act(() => result.current.closeReactionEgg());
@@ -290,15 +290,82 @@ describe("useTableApp", () => {
       act(() => result.current.sendReaction("😂"));
       expect(result.current.reactionEggVisible).toBe(false);
 
-      vi.setSystemTime(2_001);
+      act(() => vi.advanceTimersByTime(600));
       act(() => {
         for (let index = 0; index < 4; index += 1) result.current.sendReaction("😂");
         result.current.sendReaction("😂");
       });
+      expect(socket.emittedReactions).toHaveLength(8);
       expect(result.current.reactionEggVisible).toBe(true);
     } finally {
       unmount();
       vi.useRealTimers();
+    }
+  });
+
+  it("restores persisted sound and unlocks it on the first user activation", async () => {
+    localStorage.setItem("friend-poker:sound-enabled", "true");
+    soundMocks.unlock.mockClear();
+    soundMocks.playReaction.mockClear();
+    const socket = new FakeSocket();
+    const { result, unmount } = renderHook(() =>
+      useTableApp({
+        restoreIdentity: async () => identity,
+        createSocket: () => socket as unknown as TableSocket,
+      }),
+    );
+
+    try {
+      await waitFor(() => expect(result.current.phase).toBe("CONNECTING"));
+      expect(result.current.soundEnabled).toBe(true);
+      expect(soundMocks.unlock).not.toHaveBeenCalled();
+
+      act(() => window.dispatchEvent(new Event("pointerdown")));
+      expect(soundMocks.unlock).toHaveBeenCalledTimes(1);
+      act(() => window.dispatchEvent(new Event("pointerdown")));
+      act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" })));
+      expect(soundMocks.unlock).toHaveBeenCalledTimes(1);
+
+      act(() => socket.trigger(TransportEvent.TableReaction, {
+        reactionId: "reaction-persisted-sound",
+        playerId: identity.playerId,
+        emoji: "🔥",
+      }));
+      expect(soundMocks.playReaction).toHaveBeenCalledTimes(1);
+      expect(soundMocks.playReaction).toHaveBeenLastCalledWith("🔥");
+    } finally {
+      unmount();
+      localStorage.removeItem("friend-poker:sound-enabled");
+    }
+  });
+
+  it("does not unlock or play sounds when persisted sound is off", async () => {
+    localStorage.setItem("friend-poker:sound-enabled", "false");
+    soundMocks.unlock.mockClear();
+    soundMocks.playReaction.mockClear();
+    const socket = new FakeSocket();
+    const { result, unmount } = renderHook(() =>
+      useTableApp({
+        restoreIdentity: async () => identity,
+        createSocket: () => socket as unknown as TableSocket,
+      }),
+    );
+
+    try {
+      await waitFor(() => expect(result.current.phase).toBe("CONNECTING"));
+      expect(result.current.soundEnabled).toBe(false);
+      act(() => window.dispatchEvent(new Event("pointerdown")));
+      act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" })));
+      act(() => socket.trigger(TransportEvent.TableReaction, {
+        reactionId: "reaction-sound-off",
+        playerId: identity.playerId,
+        emoji: "👏",
+      }));
+      expect(soundMocks.unlock).not.toHaveBeenCalled();
+      expect(soundMocks.playReaction).not.toHaveBeenCalled();
+    } finally {
+      unmount();
+      localStorage.removeItem("friend-poker:sound-enabled");
     }
   });
 

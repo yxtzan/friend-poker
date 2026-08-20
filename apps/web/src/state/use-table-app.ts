@@ -153,11 +153,31 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
   const reactionLimiterRef = useRef(new ReactionRateLimiter());
   const reactionTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const soundPlayerRef = useRef(new TableSoundPlayer());
+  const persistedSoundUnlockPendingRef = useRef(savedSoundEnabled());
   restoreRef.current = restore;
   enterRef.current = enter;
   createSocketRef.current = createSocket;
   commandAckTimeoutRef.current = options.commandAckTimeoutMs;
   soundEnabledRef.current = soundEnabled;
+
+  useEffect(() => {
+    if (!soundEnabled || !persistedSoundUnlockPendingRef.current || typeof window === "undefined") return;
+
+    const unlockAfterActivation = (): void => {
+      if (!persistedSoundUnlockPendingRef.current) return;
+      persistedSoundUnlockPendingRef.current = false;
+      soundPlayerRef.current.unlock();
+      window.removeEventListener("pointerdown", unlockAfterActivation);
+      window.removeEventListener("keydown", unlockAfterActivation);
+    };
+
+    window.addEventListener("pointerdown", unlockAfterActivation);
+    window.addEventListener("keydown", unlockAfterActivation);
+    return () => {
+      window.removeEventListener("pointerdown", unlockAfterActivation);
+      window.removeEventListener("keydown", unlockAfterActivation);
+    };
+  }, [soundEnabled]);
 
   const acceptAuthoritativeProjection = useCallback((next: SafeTableProjection): void => {
     commandClientRef.current?.observeProjection(next);
@@ -278,6 +298,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     setSoundEnabledState(enabled);
     soundEnabledRef.current = enabled;
     saveSoundEnabled(enabled);
+    persistedSoundUnlockPendingRef.current = false;
     if (enabled) soundPlayerRef.current.unlock();
   }, []);
 
