@@ -204,13 +204,13 @@ describe("TableShell", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "开始下一手", exact: true })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "房主管理 打开", exact: true }));
+    expect(screen.getByRole("button", { name: /^开始下一手$/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^房主管理 打开$/ }));
     expect(screen.getByLabelText("小盲")).toHaveValue(1);
     expect(screen.getByLabelText("大盲")).toHaveValue(2);
-    expect(screen.getByRole("button", { name: "准备结束本场", exact: true })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^准备结束本场$/ })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "准备结束本场", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: /^准备结束本场$/ }));
     await waitFor(() => expect(screen.getByRole("dialog", { name: "结束本场确认" })).toBeInTheDocument());
     expect(screen.getByText("已完成 3 手")).toBeInTheDocument();
     expect(screen.getByText("Alice：94")).toBeInTheDocument();
