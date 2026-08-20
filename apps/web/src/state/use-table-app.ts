@@ -15,6 +15,7 @@ import {
 } from "../api/identity.js";
 import {
   CommandAcknowledgementTimeoutError,
+  CommandReconciledByProjectionError,
   UncertainCommandError,
   UncertainCommandRetryLimitError,
   TableCommandClient,
@@ -311,6 +312,9 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     } catch (error) {
       if (error instanceof UncertainCommandRetryLimitError) {
         setNotice(error.message);
+      } else if (error instanceof CommandReconciledByProjectionError) {
+        setUncertainCommand(null);
+        setNotice("牌桌状态已更新，上一条操作已结束");
       } else {
         setNotice("重新确认未完成，请等待新的牌桌状态");
       }

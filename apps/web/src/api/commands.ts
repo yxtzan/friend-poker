@@ -51,10 +51,21 @@ export class UncertainCommandRetryLimitError extends Error {
   }
 }
 
+export class CommandReconciledByProjectionError extends Error {
+  public readonly commandId: string;
+
+  public constructor(commandId: string) {
+    super(`牌桌状态已更新，操作 ${commandId} 已由最新状态完成收敛`);
+    this.name = "CommandReconciledByProjectionError";
+    this.commandId = commandId;
+  }
+}
+
 interface CommandLifecycle {
   readonly input: M11ClientCommandInput;
   readonly attempts: Set<CommandAttempt>;
   acknowledged: boolean;
+  terminal: boolean;
 }
 
 interface CommandAttempt {
@@ -106,12 +117,13 @@ export class TableCommandClient {
       projection.version > this.#uncertainEnvelope.expectedVersion
     ) {
       const commandId = this.#uncertainEnvelope.commandId;
-      this.#uncertainEnvelope = null;
-      this.#uncertainRetryCount = 0;
       const lifecycle = this.#lifecycles.get(commandId);
-      if (lifecycle !== undefined && lifecycle.attempts.size === 0) {
-        this.#lifecycles.delete(commandId);
+      this.#uncertainEnvelope = null;
+      if (lifecycle !== undefined) {
+        this.#reconcileByProjection(lifecycle);
+        return;
       }
+      this.#releaseInFlight(commandId);
     }
   }
 
@@ -126,6 +138,7 @@ export class TableCommandClient {
     if (projection === null) {
       return Promise.reject(new Error("尚未收到服务器牌桌状态"));
     }
+    this.#uncertainRetryCount = 0;
     const input: M11ClientCommandInput = Object.freeze({
       commandId: createCommandId(),
       expectedVersion: projection.version,
@@ -135,6 +148,7 @@ export class TableCommandClient {
       input,
       attempts: new Set<CommandAttempt>(),
       acknowledged: false,
+      terminal: false,
     } satisfies CommandLifecycle;
     this.#lifecycles.set(input.commandId, lifecycle);
     return this.#send(lifecycle);
@@ -153,6 +167,7 @@ export class TableCommandClient {
       input,
       attempts: new Set<CommandAttempt>(),
       acknowledged: false,
+      terminal: false,
     } satisfies CommandLifecycle;
     this.#lifecycles.set(input.commandId, lifecycle);
     return this.#send(lifecycle);
@@ -160,6 +175,9 @@ export class TableCommandClient {
 
   #send(lifecycle: CommandLifecycle): Promise<CommandResult> {
     const input = lifecycle.input;
+    if (lifecycle.terminal) {
+      return Promise.reject(new CommandReconciledByProjectionError(input.commandId));
+    }
     this.#lifecycles.set(input.commandId, lifecycle);
     this.#inFlight = true;
     this.#inFlightCommandId = input.commandId;
@@ -174,12 +192,10 @@ export class TableCommandClient {
       lifecycle.attempts.add(attempt);
 
       const releaseInFlight = (): void => {
-        if (this.#inFlightCommandId !== input.commandId) return;
-        this.#inFlight = false;
-        this.#inFlightCommandId = null;
+        this.#releaseInFlight(input.commandId);
       };
       const forgetIfComplete = (): void => {
-        if (lifecycle.acknowledged && lifecycle.attempts.size === 0) {
+        if (lifecycle.terminal && lifecycle.attempts.size === 0) {
           this.#lifecycles.delete(input.commandId);
         }
       };
@@ -201,7 +217,7 @@ export class TableCommandClient {
       attempt.timeoutId = setTimeout(() => {
         settleAttempt(() => {
           releaseInFlight();
-          if (lifecycle.acknowledged) {
+          if (lifecycle.terminal) {
             forgetIfComplete();
             return;
           }
@@ -212,8 +228,10 @@ export class TableCommandClient {
 
       const acknowledge = (result: CommandResult): void => {
         this.#acceptProjection(result.projection);
+        if (lifecycle.terminal) return;
         if (result.commandId === input.commandId) {
           lifecycle.acknowledged = true;
+          lifecycle.terminal = true;
           this.#uncertainEnvelope = null;
           this.#uncertainRetryCount = 0;
           for (const pending of [...lifecycle.attempts]) {
@@ -238,5 +256,27 @@ export class TableCommandClient {
         });
       }
     });
+  }
+
+  #reconcileByProjection(lifecycle: CommandLifecycle): void {
+    lifecycle.terminal = true;
+    const error = new CommandReconciledByProjectionError(lifecycle.input.commandId);
+    for (const attempt of [...lifecycle.attempts]) {
+      if (attempt.settled) continue;
+      attempt.settled = true;
+      if (attempt.timeoutId !== null) clearTimeout(attempt.timeoutId);
+      lifecycle.attempts.delete(attempt);
+      attempt.reject(error);
+    }
+    this.#releaseInFlight(lifecycle.input.commandId);
+    if (lifecycle.attempts.size === 0) {
+      this.#lifecycles.delete(lifecycle.input.commandId);
+    }
+  }
+
+  #releaseInFlight(commandId: string): void {
+    if (this.#inFlightCommandId !== commandId) return;
+    this.#inFlight = false;
+    this.#inFlightCommandId = null;
   }
 }

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CommandResult } from "@friend-poker/shared";
 import {
   CommandAcknowledgementTimeoutError,
+  CommandReconciledByProjectionError,
   TableCommandClient,
 } from "./commands.js";
 import type { TableSocket } from "./socket.js";
@@ -138,15 +139,21 @@ describe("TableCommandClient", () => {
       expect(secondEnvelope.command).toEqual(firstEnvelope.command);
 
       const firstAcknowledge = emit.mock.calls[0]?.[2] as (result: CommandResult) => void;
+      const reconciled = { ...projection, version: projection.version + 1, ownHoleCards: null };
+      currentProjection = reconciled;
+      const retryRejection = expect(retry).rejects.toBeInstanceOf(CommandReconciledByProjectionError);
+      client.observeProjection(reconciled);
+      await retryRejection;
+      expect(client.uncertainCommand).toBeNull();
+
       const authoritative = {
         status: "APPLIED",
         commandId: String(firstEnvelope.commandId),
-        version: 8,
+        version: reconciled.version,
         data: { kind: "NONE" },
-        projection: { ...projection, version: 8 },
+        projection: reconciled,
       } satisfies CommandResult;
       firstAcknowledge(authoritative);
-      await expect(retry).resolves.toMatchObject({ status: "APPLIED" });
       expect(client.uncertainCommand).toBeNull();
 
       await vi.advanceTimersByTimeAsync(50);

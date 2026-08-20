@@ -164,6 +164,16 @@ describe("useTableApp", () => {
     });
     await waitFor(() => expect(socket.emitted).toHaveLength(2));
     act(() => {
+      socket.trigger(TransportEvent.TableState, newer);
+    });
+    if (retryPromise === undefined) throw new Error("retry was not submitted");
+    await expect(retryPromise).resolves.toBeNull();
+    await waitFor(() => expect(result.current.pendingCommand).toBeNull());
+    await waitFor(() => expect(result.current.uncertainCommand).toBeNull());
+    await waitFor(() => expect(result.current.projection).toBe(newer));
+    expect(result.current.notice).toBe("牌桌状态已更新，上一条操作已结束");
+
+    act(() => {
       socket.acknowledgements[0]?.({
         status: "APPLIED",
         commandId: socket.emitted[0]?.commandId ?? "missing",
@@ -172,11 +182,9 @@ describe("useTableApp", () => {
         projection: newer,
       });
     });
-    if (retryPromise === undefined) throw new Error("retry was not submitted");
-    await expect(retryPromise).resolves.toMatchObject({ status: "APPLIED" });
-    await waitFor(() => expect(result.current.uncertainCommand).toBeNull());
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(result.current.uncertainCommand).toBeNull();
+    expect(result.current.pendingCommand).toBeNull();
     expect(socket.emitted).toHaveLength(2);
 
     let nextPromise: Promise<CommandResult | null> | undefined;
