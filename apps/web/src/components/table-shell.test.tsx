@@ -87,8 +87,9 @@ describe("TableShell", () => {
       />,
     );
 
-    const sitButton = screen.getByTestId("seat-1").querySelector("button");
-    if (sitButton === null) throw new Error("empty seat button not found");
+    const emptySeat = within(screen.getByTestId("seat-1"));
+    expect(emptySeat.getByText("空座")).toBeInTheDocument();
+    const sitButton = emptySeat.getByRole("button", { name: "坐下" });
     fireEvent.click(sitButton);
     expect(onCommand).toHaveBeenCalledWith({ type: "SIT", seat: 1 });
     expect(screen.getByText("当前没有可展示的私人底牌")).toBeInTheDocument();

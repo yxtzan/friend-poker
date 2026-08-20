@@ -30,10 +30,10 @@ export function Seat({
   if (player === null) {
     return (
       <div className="seat empty-seat" data-testid={`seat-${seat}`}>
-        <span className="empty-seat-label">空座位</span>
+        <span className="empty-seat-label">空座</span>
         {canSit && (
           <button className="seat-action" type="button" onClick={() => onSit(seat)} disabled={pending}>
-            {pending ? "处理中…" : "点击坐下"}
+            {pending ? "处理中…" : "坐下"}
           </button>
         )}
       </div>

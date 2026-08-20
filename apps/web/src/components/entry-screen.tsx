@@ -43,7 +43,7 @@ export function EntryScreen({ app }: EntryScreenProps) {
           <div className="entry-form-column">
             <div className="entry-kicker">进入牌桌</div>
             <h1 id="entry-title">先坐下，再开牌</h1>
-            <p className="entry-intro">输入一个朋友认识的名字，选择位置。</p>
+            <p className="entry-intro">输入名字，选择位置。</p>
 
             {app.notice !== null && (
               <p className="notice notice-error" role="alert">
