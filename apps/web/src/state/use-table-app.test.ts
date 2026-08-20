@@ -15,6 +15,7 @@ class FakeSocket {
   public connected = false;
   readonly #listeners = new Map<string, ((...args: never[]) => void)[]>();
   public readonly emitted: M10ClientCommandInput[] = [];
+  public readonly acknowledgements: ((result: CommandResult) => void)[] = [];
   public acknowledge: ((result: CommandResult) => void) | null = null;
 
   public on(event: string, listener: (...args: never[]) => void): this {
@@ -28,6 +29,7 @@ class FakeSocket {
     if (event === TransportEvent.TableCommand) {
       this.emitted.push(args[0] as M10ClientCommandInput);
       this.acknowledge = args[1] as (result: CommandResult) => void;
+      this.acknowledgements.push(this.acknowledge);
     }
     return true;
   }
@@ -154,8 +156,47 @@ describe("useTableApp", () => {
     expect(socket.emitted).toHaveLength(1);
     expect(result.current.projection).toBe(initial);
     expect(result.current.notice).toContain("可能已经处理");
+    await waitFor(() => expect(result.current.uncertainCommand).not.toBeNull());
+
+    let retryPromise: Promise<CommandResult | null> | undefined;
+    act(() => {
+      retryPromise = result.current.retryUncertainCommand();
+    });
+    await waitFor(() => expect(socket.emitted).toHaveLength(2));
+    act(() => {
+      socket.acknowledgements[0]?.({
+        status: "APPLIED",
+        commandId: socket.emitted[0]?.commandId ?? "missing",
+        version: 21,
+        data: { kind: "NONE" },
+        projection: newer,
+      });
+    });
+    if (retryPromise === undefined) throw new Error("retry was not submitted");
+    await expect(retryPromise).resolves.toMatchObject({ status: "APPLIED" });
+    await waitFor(() => expect(result.current.uncertainCommand).toBeNull());
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(result.current.uncertainCommand).toBeNull();
+    expect(socket.emitted).toHaveLength(2);
+
+    let nextPromise: Promise<CommandResult | null> | undefined;
+    act(() => {
+      nextPromise = result.current.submitCommand({ type: "CHECK" });
+    });
+    await waitFor(() => expect(socket.emitted).toHaveLength(3));
+    act(() => {
+      socket.acknowledgements[2]?.({
+        status: "APPLIED",
+        commandId: socket.emitted[2]?.commandId ?? "missing",
+        version: 22,
+        data: { kind: "NONE" },
+        projection: { ...newer, version: 22 },
+      });
+    });
+    if (nextPromise === undefined) throw new Error("next command was not submitted");
+    await expect(nextPromise).resolves.toMatchObject({ status: "APPLIED" });
 
     act(() => socket.trigger(TransportEvent.TableState, newer));
-    await waitFor(() => expect(result.current.projection).toBe(newer));
+    await waitFor(() => expect(result.current.projection?.version).toBe(22));
   });
 });

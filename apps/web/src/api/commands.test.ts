@@ -115,9 +115,12 @@ describe("TableCommandClient", () => {
       const projection = projectionFixture();
       const emit = vi.fn();
       const socket = { emit } as unknown as TableSocket;
-      const acceptProjection = vi.fn();
+      let currentProjection = projection;
+      const acceptProjection = vi.fn((next: typeof projection) => {
+        currentProjection = next;
+      });
       const client = new TableCommandClient(socket, {
-        getProjection: () => projection,
+        getProjection: () => currentProjection,
         acceptProjection,
         ackTimeoutMs: 50,
       });
@@ -134,18 +137,33 @@ describe("TableCommandClient", () => {
       expect(secondEnvelope.expectedVersion).toBe(firstEnvelope.expectedVersion);
       expect(secondEnvelope.command).toEqual(firstEnvelope.command);
 
-      const acknowledge = emit.mock.calls[1]?.[2] as (result: CommandResult) => void;
-      acknowledge({
-        status: "DUPLICATE",
+      const firstAcknowledge = emit.mock.calls[0]?.[2] as (result: CommandResult) => void;
+      const authoritative = {
+        status: "APPLIED",
         commandId: String(firstEnvelope.commandId),
         version: 8,
-        originalVersion: 8,
-        originalStatus: "APPLIED",
         data: { kind: "NONE" },
         projection: { ...projection, version: 8 },
-      });
-      await expect(retry).resolves.toMatchObject({ status: "DUPLICATE" });
+      } satisfies CommandResult;
+      firstAcknowledge(authoritative);
+      await expect(retry).resolves.toMatchObject({ status: "APPLIED" });
+      expect(client.uncertainCommand).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(50);
       expect(emit).toHaveBeenCalledTimes(2);
+
+      const next = client.submit({ type: "CHECK" });
+      expect(emit).toHaveBeenCalledTimes(3);
+      const nextAcknowledge = emit.mock.calls[2]?.[2] as (result: CommandResult) => void;
+      nextAcknowledge({
+        status: "APPLIED",
+        commandId: String((emit.mock.calls[2]?.[1] as Record<string, unknown>).commandId),
+        version: 9,
+        data: { kind: "NONE" },
+        projection: { ...projection, version: 9 },
+      });
+      await expect(next).resolves.toMatchObject({ status: "APPLIED" });
+      expect(client.uncertainCommand).toBeNull();
     } finally {
       vi.useRealTimers();
     }

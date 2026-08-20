@@ -51,6 +51,20 @@ export class UncertainCommandRetryLimitError extends Error {
   }
 }
 
+interface CommandLifecycle {
+  readonly input: M11ClientCommandInput;
+  readonly attempts: Set<CommandAttempt>;
+  acknowledged: boolean;
+}
+
+interface CommandAttempt {
+  readonly lifecycle: CommandLifecycle;
+  readonly resolve: (result: CommandResult) => void;
+  readonly reject: (reason?: unknown) => void;
+  settled: boolean;
+  timeoutId: ReturnType<typeof setTimeout> | null;
+}
+
 /**
  * The only browser command path. It sends a command intent and adopts the
  * projection returned by the authoritative server for every acknowledgement.
@@ -64,6 +78,8 @@ export class TableCommandClient {
   #uncertainEnvelope: M11ClientCommandInput | null = null;
   #uncertainRetryCount = 0;
   #inFlight = false;
+  #inFlightCommandId: string | null = null;
+  readonly #lifecycles = new Map<string, CommandLifecycle>();
 
   public constructor(socket: TableSocket, options: CommandClientOptions) {
     this.#socket = socket;
@@ -89,8 +105,13 @@ export class TableCommandClient {
       this.#uncertainEnvelope !== null &&
       projection.version > this.#uncertainEnvelope.expectedVersion
     ) {
+      const commandId = this.#uncertainEnvelope.commandId;
       this.#uncertainEnvelope = null;
       this.#uncertainRetryCount = 0;
+      const lifecycle = this.#lifecycles.get(commandId);
+      if (lifecycle !== undefined && lifecycle.attempts.size === 0) {
+        this.#lifecycles.delete(commandId);
+      }
     }
   }
 
@@ -110,7 +131,13 @@ export class TableCommandClient {
       expectedVersion: projection.version,
       command,
     });
-    return this.#send(input);
+    const lifecycle = {
+      input,
+      attempts: new Set<CommandAttempt>(),
+      acknowledged: false,
+    } satisfies CommandLifecycle;
+    this.#lifecycles.set(input.commandId, lifecycle);
+    return this.#send(lifecycle);
   }
 
   public retryUncertain(): Promise<CommandResult> {
@@ -121,41 +148,94 @@ export class TableCommandClient {
       return Promise.reject(new UncertainCommandRetryLimitError());
     }
     this.#uncertainRetryCount += 1;
-    return this.#send(this.#uncertainEnvelope);
+    const input = this.#uncertainEnvelope;
+    const lifecycle = this.#lifecycles.get(input.commandId) ?? {
+      input,
+      attempts: new Set<CommandAttempt>(),
+      acknowledged: false,
+    } satisfies CommandLifecycle;
+    this.#lifecycles.set(input.commandId, lifecycle);
+    return this.#send(lifecycle);
   }
 
-  #send(input: M11ClientCommandInput): Promise<CommandResult> {
+  #send(lifecycle: CommandLifecycle): Promise<CommandResult> {
+    const input = lifecycle.input;
+    this.#lifecycles.set(input.commandId, lifecycle);
     this.#inFlight = true;
+    this.#inFlightCommandId = input.commandId;
     return new Promise((resolve, reject) => {
-      let settled = false;
-      const timeoutId = setTimeout(() => {
-        settled = true;
+      const attempt: CommandAttempt = {
+        lifecycle,
+        resolve,
+        reject,
+        settled: false,
+        timeoutId: null,
+      };
+      lifecycle.attempts.add(attempt);
+
+      const releaseInFlight = (): void => {
+        if (this.#inFlightCommandId !== input.commandId) return;
         this.#inFlight = false;
-        this.#uncertainEnvelope = input;
-        reject(new CommandAcknowledgementTimeoutError(input.commandId, this.#ackTimeoutMs));
+        this.#inFlightCommandId = null;
+      };
+      const forgetIfComplete = (): void => {
+        if (lifecycle.acknowledged && lifecycle.attempts.size === 0) {
+          this.#lifecycles.delete(input.commandId);
+        }
+      };
+      const settleAttempt = (settlement: () => void): void => {
+        if (attempt.settled) return;
+        attempt.settled = true;
+        if (attempt.timeoutId !== null) clearTimeout(attempt.timeoutId);
+        lifecycle.attempts.delete(attempt);
+        settlement();
+      };
+      const settleAnyAttempt = (pending: CommandAttempt, result: CommandResult): void => {
+        if (pending.settled) return;
+        pending.settled = true;
+        if (pending.timeoutId !== null) clearTimeout(pending.timeoutId);
+        pending.lifecycle.attempts.delete(pending);
+        pending.resolve(result);
+      };
+
+      attempt.timeoutId = setTimeout(() => {
+        settleAttempt(() => {
+          releaseInFlight();
+          if (lifecycle.acknowledged) {
+            forgetIfComplete();
+            return;
+          }
+          this.#uncertainEnvelope = input;
+          reject(new CommandAcknowledgementTimeoutError(input.commandId, this.#ackTimeoutMs));
+        });
       }, this.#ackTimeoutMs);
+
       const acknowledge = (result: CommandResult): void => {
-        // A late ACK may prove that the server applied the command after the
-        // client timed out. It is still authoritative and resolves uncertainty.
         this.#acceptProjection(result.projection);
         if (result.commandId === input.commandId) {
+          lifecycle.acknowledged = true;
           this.#uncertainEnvelope = null;
           this.#uncertainRetryCount = 0;
+          for (const pending of [...lifecycle.attempts]) {
+            settleAnyAttempt(pending, result);
+          }
+          releaseInFlight();
+          forgetIfComplete();
+          return;
         }
-        if (settled) return;
-        settled = true;
-        this.#inFlight = false;
-        clearTimeout(timeoutId);
-        resolve(result);
+        settleAttempt(() => {
+          releaseInFlight();
+          resolve(result);
+        });
       };
+
       try {
         this.#socket.emit(TransportEvent.TableCommand, input, acknowledge);
       } catch (error) {
-        if (settled) return;
-        settled = true;
-        this.#inFlight = false;
-        clearTimeout(timeoutId);
-        reject(error);
+        settleAttempt(() => {
+          releaseInFlight();
+          reject(error);
+        });
       }
     });
   }

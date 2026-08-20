@@ -127,7 +127,8 @@ export type RuntimeCommand =
   | {
       readonly type: typeof RuntimeCommandType.StartFirstHand;
       readonly handId: string;
-      readonly buttonSeat: TableSeat;
+      /** Omitted only for browser intents; runtime derives the trusted Button. */
+      readonly buttonSeat?: TableSeat;
     }
   | {
       readonly type: typeof RuntimeCommandType.StartNextHand;

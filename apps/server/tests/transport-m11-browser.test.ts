@@ -86,11 +86,20 @@ describe("M11 browser intent transport", () => {
     );
     expect(started.status).toBe("APPLIED");
     await synchronizeClients([alice, bob]);
-    const hand = await executeSocketCommand(
-      alice.socket,
-      nextCommand(alice.latestProjection, "browser-contract-hand", { type: "START_FIRST_HAND" }),
+    const handInput = nextCommand(
+      alice.latestProjection,
+      "browser-contract-hand",
+      { type: "START_FIRST_HAND" },
     );
+    const maliciousHandInput = {
+      ...handInput,
+      command: { type: "START_FIRST_HAND", buttonSeat: 4 },
+    };
+    const hand = await executeSocketCommand(alice.socket, maliciousHandInput);
     expect(hand.status).toBe("APPLIED");
+    expect(hand.projection.currentHand?.buttonSeat).toBe(0);
+    const duplicateHand = await executeSocketCommand(alice.socket, maliciousHandInput);
+    expect(duplicateHand.status).toBe("DUPLICATE");
     await synchronizeClients([alice, bob]);
     const actor = hand.projection.currentHand?.currentActorId === alice.identity.playerId ? alice : bob;
     const input = nextCommand(actor.latestProjection, "browser-contract-fold", { type: "FOLD" });

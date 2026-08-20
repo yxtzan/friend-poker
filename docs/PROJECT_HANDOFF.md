@@ -341,9 +341,9 @@ not technical debt to “fix” casually by persisting decks or private hole car
 Verified on the M11 implementation snapshot based on branch `agent/milestone-11-playable-controls`
 and baseline `main@d02983e`:
 
-- standard suite: **374 tests** total;
+- standard suite: **376 tests** total;
 - `apps/server`: **104 tests** across 10 test files;
-- `apps/web`: **21 tests** across 7 test files;
+- `apps/web`: **23 tests** across 7 test files;
 - `packages/poker-engine`: **249 tests** across 28 test files;
 - exhaustive evaluator suite: **1 additional exhaustive test**;
 - CI migration smoke step, `npm run db:migrate:deploy --workspace @friend-poker/server`, remains

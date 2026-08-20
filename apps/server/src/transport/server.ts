@@ -154,22 +154,6 @@ function derivedBrowserId(
   return `browser-${purpose}-${playerId}-${commandId}`;
 }
 
-function firstEligibleSeat(projection: SafeTableProjection): TableSeat {
-  const player = projection.seats.find(
-    (candidate): candidate is NonNullable<typeof candidate> =>
-      candidate !== null && candidate.present && candidate.online && candidate.chipBalance > 0,
-  );
-  return player?.seat ?? 0;
-}
-
-function stableFirstHandButton(projection: SafeTableProjection): TableSeat {
-  if (projection.currentHand !== null) return projection.currentHand.buttonSeat as TableSeat;
-  if (projection.session?.lastButtonSeat !== null && projection.session?.lastButtonSeat !== undefined) {
-    return projection.session.lastButtonSeat;
-  }
-  return firstEligibleSeat(projection);
-}
-
 function startSessionInitialGrants(
   projection: SafeTableProjection,
   playerId: PlayerId,
@@ -260,12 +244,6 @@ function enrichBrowserCommand(
       return {
         type: RuntimeCommandType.StartFirstHand,
         handId: derivedBrowserId("first-hand", playerId, commandId),
-        buttonSeat:
-          Number.isInteger(command.buttonSeat) &&
-          (command.buttonSeat as number) >= 0 &&
-          (command.buttonSeat as number) <= 5
-            ? command.buttonSeat as TableSeat
-            : stableFirstHandButton(projection),
       };
     case "START_NEXT_HAND":
       return {
@@ -458,6 +436,15 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
         checkpoint = runtime.exportDurableCheckpointState();
       } catch {
         if (result.status === "APPLIED" || identityChanged) {
+          const shouldPersistProcessedStart =
+            envelope.command.type === RuntimeCommandType.StartFirstHand &&
+            result.status === "APPLIED";
+          const processedStart = shouldPersistProcessedStart
+            ? runtime.processedCommandRecord(envelope.commandId)
+            : null;
+          if (shouldPersistProcessedStart && processedStart === null) {
+            throw new Error("Successful START_FIRST_HAND has no idempotency record");
+          }
           await persistence.commitVersionHighWater({
             runtimeVersion: runtime.version,
             ...(identityChanged
@@ -466,6 +453,7 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
                   identities: identities.durableRecords(),
                 }
               : {}),
+            ...(processedStart === null ? {} : { processedCommand: processedStart }),
           });
         }
         return result;

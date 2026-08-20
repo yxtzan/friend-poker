@@ -112,14 +112,27 @@ function clientById(clients: readonly ConnectedClient[], playerId: string): Conn
 
 describe("durable checkpoint recovery", () => {
   it("rolls an unfinished hand back to the pre-hand checkpoint", async () => {
-    const clients = await createSeatedPlayers(3);
+    const clients: ConnectedClient[] = [];
+    clients.push(
+      await createConnectedClient(fixture!, "Persist1", { kind: "SEAT", seat: 1 }),
+      await createConnectedClient(fixture!, "Persist2", { kind: "SEAT", seat: 0 }),
+      await createConnectedClient(fixture!, "Persist3", { kind: "SEAT", seat: 2 }),
+    );
+    await synchronizeClients(clients);
     const started = await startSession(clients, "rollback");
     const preHandBalances = Object.fromEntries(
       started.projection.seats
         .filter((player) => player !== null)
         .map((player) => [player.playerId, player.chipBalance]),
     );
-    let active = await startFirstHand(clients, "rollback");
+    const firstHandEnvelope = nextCommand(
+      clients[0]!.latestProjection,
+      "start-hand-rollback",
+      { type: "START_FIRST_HAND" },
+    );
+    let active = await executeSocketCommand(clients[0]!.socket, firstHandEnvelope);
+    expect(active.status).toBe("APPLIED");
+    expect(active.projection.currentHand?.buttonSeat).toBe(0);
 
     for (let actionIndex = 0; actionIndex < 2; actionIndex += 1) {
       const hand = active.projection.currentHand;
@@ -160,7 +173,22 @@ describe("durable checkpoint recovery", () => {
       });
     }
 
-    for (let index = 0; index < cookies.length; index += 1) {
+    const recoveredHost = await connectWithCookie(fixture!, cookies[0]!);
+    const retriedStart = await executeSocketCommand(recoveredHost.socket, firstHandEnvelope);
+    expect(retriedStart.status).toBe("DUPLICATE");
+    expect(retriedStart.projection.status).toBe(TableLifecycleStatus.WaitingForFirstHand);
+    expect(retriedStart.projection.currentHand).toBeNull();
+    expect(
+      retriedStart.projection.seats
+        .filter((player) => player !== null)
+        .map((player) => player.chipBalance),
+    ).toEqual(
+      recovered.seats
+        .filter((player) => player !== null)
+        .map((player) => player.chipBalance),
+    );
+
+    for (let index = 1; index < cookies.length; index += 1) {
       const connected = await connectWithCookie(fixture!, cookies[index]!);
       expect(findPublicPlayer(connected.initialProjection, playerIds[index]!)).toMatchObject({
         playerId: playerIds[index],

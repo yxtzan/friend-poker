@@ -85,6 +85,15 @@ function socketErrorMessage(error: Error & { readonly data?: { readonly code?: s
   return "无法连接牌桌服务器，请稍后重试";
 }
 
+function uncertainCommandState(
+  client: TableCommandClient | null,
+): TableAppState["uncertainCommand"] {
+  const unresolved = client?.uncertainCommand;
+  return unresolved === null || unresolved === undefined
+    ? null
+    : { commandId: unresolved.commandId, type: unresolved.command.type };
+}
+
 export function useTableApp(options: TableAppOptions = {}): TableAppState {
   const restore = options.restoreIdentity ?? attemptIdentityRecovery;
   const enter = options.enterIdentity ?? enterIdentity;
@@ -114,12 +123,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
 
   const acceptAuthoritativeProjection = useCallback((next: SafeTableProjection): void => {
     commandClientRef.current?.observeProjection(next);
-    const unresolved = commandClientRef.current?.uncertainCommand;
-    setUncertainCommand(
-      unresolved === null || unresolved === undefined
-        ? null
-        : { commandId: unresolved.commandId, type: unresolved.command.type },
-    );
+    setUncertainCommand(uncertainCommandState(commandClientRef.current));
     setProjection((previous) => {
       const accepted = acceptProjection(previous, next);
       projectionRef.current = accepted;
@@ -273,12 +277,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
       return result;
     } catch (error) {
       if (error instanceof CommandAcknowledgementTimeoutError) {
-        const unresolved = commandClient.uncertainCommand;
-        setUncertainCommand(
-          unresolved === null
-            ? null
-            : { commandId: unresolved.commandId, type: unresolved.command.type },
-        );
+        setUncertainCommand(uncertainCommandState(commandClient));
         setNotice("操作确认超时，服务器可能已经处理；请以最新牌桌状态为准");
       } else if (error instanceof UncertainCommandError) {
         setNotice("上一条操作尚未确认，请先重新确认");
@@ -300,12 +299,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     setPendingCommand(uncertainCommand?.type ?? null);
     try {
       const result = await commandClient.retryUncertain();
-      const unresolved = commandClient.uncertainCommand;
-      setUncertainCommand(
-        unresolved === null
-          ? null
-          : { commandId: unresolved.commandId, type: unresolved.command.type },
-      );
+      setUncertainCommand(uncertainCommandState(commandClient));
       if (result.status === "REJECTED") {
         setNotice(commandErrorMessage(result.reason, result.message));
       } else if (result.status === "DUPLICATE") {
@@ -322,6 +316,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
       }
       return null;
     } finally {
+      setUncertainCommand(uncertainCommandState(commandClient));
       setPendingCommand(null);
     }
   }, [uncertainCommand]);
