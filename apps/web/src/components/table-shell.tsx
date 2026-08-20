@@ -76,14 +76,17 @@ export function TableShell({
   return (
     <main className="table-page">
       <header className="topbar">
-        <div>
-          <div className="eyebrow">FRIEND POKER · PRIVATE TABLE</div>
-          <h1>朋友局</h1>
+        <div className="brand-lockup">
+          <span className="brand-mark" aria-hidden="true">FP</span>
+          <div>
+            <div className="brand-name">Friend Poker</div>
+            <h1>朋友局</h1>
+          </div>
         </div>
         <div className="topbar-status" role="status">
           <span className={`connection-dot phase-${phase.toLowerCase()}`} aria-hidden="true" />
           <span>{phaseLabel(phase)}</span>
-          <span className="version-label">v{projection.version}</span>
+          <span className="version-label">同步 v{projection.version}</span>
         </div>
       </header>
 
@@ -93,14 +96,14 @@ export function TableShell({
         </p>
       )}
 
-      <section className="status-strip" aria-label="牌桌状态">
-        <span className="status-item status-primary">{tableStatusLabel(projection.status)}</span>
-        <span className="status-item">
+      <section className="table-meta" aria-label="牌桌状态">
+        <span className="table-meta-item table-meta-primary">{tableStatusLabel(projection.status)}</span>
+        <span className="table-meta-item">
           盲注 {projection.session?.blinds.smallBlind ?? "—"} / {projection.session?.blinds.bigBlind ?? "—"}
         </span>
-        <span className="status-item">房主：{host?.nickname ?? "暂无"}</span>
+        <span className="table-meta-item">房主 · {host?.nickname ?? "暂无"}</span>
         {hand !== null && (
-          <span className="status-item">
+          <span className="table-meta-item">
             {streetLabel(hand.street)} · {handStatusLabel(hand.status)}
           </span>
         )}
@@ -150,6 +153,15 @@ export function TableShell({
                   pending={pendingCommand === "SIT"}
                   onSit={(selectedSeat) => onCommand({ type: "SIT", seat: selectedSeat })}
                 />
+                {viewerSeat === seat && projection.ownHoleCards !== null && (
+                  <div className="viewer-hole-cards" aria-label="你的底牌">
+                    <span className="viewer-hole-label">你的牌</span>
+                    <div className="hole-cards">
+                      <PlayingCard card={projection.ownHoleCards[0]} compact />
+                      <PlayingCard card={projection.ownHoleCards[1]} compact />
+                    </div>
+                  </div>
+                )}
                 <div className="position-badges" aria-label="牌桌位置">
                   {hand?.buttonSeat === seat && <span className="position-badge dealer-badge">D</span>}
                   {hand?.smallBlindSeat === seat && <span className="position-badge blind-badge">SB</span>}
@@ -161,24 +173,13 @@ export function TableShell({
         </div>
       </section>
 
-      <section className="table-lower-grid">
-        <div className="hole-card-panel">
-          <div className="panel-heading">你的手牌</div>
-          {projection.ownHoleCards === null ? (
-            <p className="muted-copy">当前没有可展示的私人底牌</p>
-          ) : (
-            <div className="hole-cards" aria-label="你的底牌">
-              <PlayingCard card={projection.ownHoleCards[0]} />
-              <PlayingCard card={projection.ownHoleCards[1]} />
-            </div>
-          )}
-        </div>
-
-        <div className="spectator-panel">
-          <div className="panel-heading">旁观席 <span>{projection.spectators.length} / 2</span></div>
+      <section className="table-utility" aria-label="牌桌辅助信息">
+        <div className="utility-group spectator-group">
+          <span className="utility-label">旁观席</span>
+          <span className="utility-count">{projection.spectators.length} / 2</span>
           <div className="spectator-list">
             {projection.spectators.length === 0 ? (
-              <span className="muted-copy">还没有旁观者</span>
+              <span className="muted-copy">暂无</span>
             ) : (
               projection.spectators.map((spectator) => (
                 <span className="spectator-chip" key={spectator.playerId}>
@@ -190,13 +191,16 @@ export function TableShell({
           </div>
         </div>
 
-        <div className="presence-panel">
-          <div className="panel-heading">我的位置</div>
-          <p className="presence-copy">{viewerSeat === null ? "旁观中" : `座位 ${viewerSeat + 1}`}</p>
+        <div className="utility-group presence-group">
+          <span className="utility-label">你</span>
+          <span className="presence-copy">{viewerSeat === null ? "旁观中" : `座位 ${viewerSeat + 1}`}</span>
+          {projection.ownHoleCards === null && (
+            <span className="muted-copy">当前没有可展示的私人底牌</span>
+          )}
+          {viewerCanSit && (
+            <span className="muted-copy">点击桌上空座位坐下</span>
+          )}
           <div className="presence-actions">
-            {viewerCanSit && (
-              <span className="muted-copy">点击桌上任一空座位坐下</span>
-            )}
             {viewerSeat !== null && (
               <button
                 className="secondary-button"

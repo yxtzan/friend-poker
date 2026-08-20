@@ -47,7 +47,8 @@ describe("TableShell", () => {
     expect(within(ownCards).getByLabelText("A♥")).toBeInTheDocument();
     expect(within(ownCards).getByLabelText("A♦")).toBeInTheDocument();
     expect(screen.queryByLabelText("Q♣")).not.toBeInTheDocument();
-    expect(screen.getByText("你的手牌")).toBeInTheDocument();
+    expect(screen.getByText("你的牌")).toBeInTheDocument();
+    expect(screen.queryByText("我的位置")).not.toBeInTheDocument();
   });
 
   it("renders undealt community cards as empty board slots, not hidden cards", () => {
