@@ -431,7 +431,7 @@ function ActionDock({
   const isTurn = legal !== null && legal.playerId === viewerId;
   const isHost = projection.hostPlayerId === viewerId;
   const progression = hand === null
-    ? projection.status === TableLifecycleStatus.NoSession
+    ? projection.status === TableLifecycleStatus.NoSession || projection.status === TableLifecycleStatus.SessionEnded
       ? { hostLabel: "开始本场", waitingLabel: "等待房主开始本场", command: M11CommandType.StartSession }
       : projection.status === TableLifecycleStatus.WaitingForFirstHand
         ? { hostLabel: "开始第一手", waitingLabel: "等待房主开始第一手", command: M11CommandType.StartFirstHand }

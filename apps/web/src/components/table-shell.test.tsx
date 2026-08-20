@@ -160,6 +160,25 @@ describe("TableShell", () => {
     }
   });
 
+  it("lets the host start a new Session after the previous Session ended", () => {
+    const onCommand = vi.fn();
+    render(
+      <TableShell
+        projection={projectionFixture({ status: "SESSION_ENDED", currentHand: null })}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        notice={null}
+        onCommand={onCommand}
+      />,
+    );
+
+    const actionDock = screen.getByLabelText("行动区");
+    expect(within(actionDock).getAllByRole("button", { name: "开始本场" })).toHaveLength(1);
+    fireEvent.click(within(actionDock).getByRole("button", { name: "开始本场" }));
+    expect(onCommand).toHaveBeenLastCalledWith({ type: "START_SESSION" });
+  });
+
   it("uses playerId, not nickname or seat, for host progression and waiting copy", () => {
     const hostView = render(
       <TableShell
@@ -288,6 +307,7 @@ describe("TableShell", () => {
   it("shows status-specific waiting copy to non-hosts for every manual progression stage", () => {
     const cases = [
       { status: "NO_SESSION" as const, waiting: "等待房主开始本场", start: "开始本场" },
+      { status: "SESSION_ENDED" as const, waiting: "等待房主开始本场", start: "开始本场" },
       { status: "SESSION_WAITING_FOR_FIRST_HAND" as const, waiting: "等待房主开始第一手", start: "开始第一手" },
       { status: "BETWEEN_HANDS" as const, waiting: "等待房主开始下一手", start: "开始下一手" },
     ];
