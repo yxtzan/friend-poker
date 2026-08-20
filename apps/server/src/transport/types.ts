@@ -1,10 +1,13 @@
-import type { PlayerId, TableSeat } from "@friend-poker/poker-engine";
-import type { RuntimeCommandType } from "../runtime/types.js";
+import type { PlayerId } from "@friend-poker/poker-engine";
 import type {
-  CommandExecutionResult,
-  RuntimeCommand,
-  SafeTableProjection,
-} from "../runtime/types.js";
+  EntryPosition as SharedEntryPosition,
+  IdentityResponse as SharedIdentityResponse,
+  ServerToClientEvents as SharedServerToClientEvents,
+  TransportErrorResponse as SharedTransportErrorResponse,
+} from "@friend-poker/shared";
+export { TransportEvent } from "@friend-poker/shared";
+import type { RuntimeCommandType } from "../runtime/types.js";
+import type { CommandExecutionResult, RuntimeCommand } from "../runtime/types.js";
 
 export type ClientRuntimeCommand = Exclude<
   RuntimeCommand,
@@ -19,37 +22,17 @@ export type ClientRuntimeCommand = Exclude<
   }
 >;
 
-export const TransportEvent = Object.freeze({
-  TableCommand: "TABLE_COMMAND",
-  TableState: "TABLE_STATE",
-  IdentityRevoked: "IDENTITY_REVOKED",
-} as const);
-
 export interface ClientCommandInput {
   readonly commandId: string;
   readonly expectedVersion: number;
   readonly command: ClientRuntimeCommand;
 }
 
-export type EntryPosition =
-  | { readonly kind: "SPECTATOR" }
-  | { readonly kind: "SEAT"; readonly seat: TableSeat };
+export type EntryPosition = SharedEntryPosition;
+export type IdentityResponse = SharedIdentityResponse;
+export type TransportErrorResponse = SharedTransportErrorResponse;
 
-export interface IdentityResponse {
-  readonly status: "CREATED" | "RESTORED" | "REENTERED";
-  readonly playerId: PlayerId;
-  readonly nickname: string;
-}
-
-export interface TransportErrorResponse {
-  readonly error: string;
-  readonly message: string;
-}
-
-export interface ServerToClientEvents {
-  TABLE_STATE: (projection: SafeTableProjection) => void;
-  IDENTITY_REVOKED: (event: { readonly reason: "KICKED" | "SESSION_ENDED" }) => void;
-}
+export type ServerToClientEvents = SharedServerToClientEvents;
 
 export interface ClientToServerEvents {
   TABLE_COMMAND: (

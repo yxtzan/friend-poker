@@ -1,14 +1,14 @@
 # Friend Poker Project Handoff
 
-Canonical fast-recovery reference for the repository state after Milestone 9.
+Canonical fast-recovery reference for the repository state after the Milestone 10 web
+foundation.
 
-- Verified branch baseline: `main`
-- Verified main commit: `de44515 Implement Milestone 9 persistence recovery`
-- Full commit: `de44515f34e33db9aa0bb4f7773f11ecd2b6541b`
+- Verified main baseline before M10: `3d3685e Add canonical project handoff`
 - Last repository verification: 2026-08-20
-- Next major phase: React client/UX, then deployment and polish
+- Next major phase: gameplay controls, host/admin UX, then deployment and polish
 
-This file describes current `main`, not an intermediate milestone or a chat transcript.
+This file describes the current implementation snapshot, not an intermediate milestone or a
+chat transcript.
 
 ## 1. Project snapshot
 
@@ -41,17 +41,22 @@ behavior until that is resolved.
 
 ## 3. Current architecture
 
-The current npm workspace contains two implemented packages. `apps/web` and `packages/shared`
-do not yet exist.
+The current npm workspace contains three implemented packages and two applications. The web
+application consumes browser-safe contracts from `packages/shared`; it does not import the
+server runtime or poker engine.
 
 ```text
-future React client
-  -> safe server DTOs and typed client commands only
+apps/web
+  -> packages/shared
+  -> HTTP identity entry + typed Socket.IO commands
 
 apps/server
   -> packages/poker-engine
   -> Express / Socket.IO
   -> Prisma / SQLite
+
+packages/shared
+  -> browser-safe DTOs and transport contracts only
 
 packages/poker-engine
   -> no React, Express, Socket.IO, or persistence dependency
@@ -89,6 +94,26 @@ Dependency direction is inward: transport calls the runtime, the runtime calls t
 engine, and persistence supports the authoritative server. Transport and future UI must not
 reimplement poker rules or become alternate sources of game truth.
 
+### `packages/shared`
+
+Browser-safe DTOs, public projection shapes, transport event names, identity responses, and
+the M10 presence-command envelope. It contains no server runtime, persistence, credential, or
+private-hand implementation.
+
+### `apps/web`
+
+React + TypeScript + Vite client foundation:
+
+- HttpOnly-cookie identity recovery and nickname/seat/spectator entry;
+- responsive six-seat oval table with public board, pot, street, hand status, host, online,
+  offline, current-actor, contribution, and spectator state;
+- own-hole-card-only rendering from the per-viewer projection;
+- centralized versioned command submission for `SIT`, `STAND_TO_SPECTATE`, and `LEAVE_TABLE`;
+- reconnect, disconnect, revocation, stale-version, duplicate, and server-error feedback.
+
+The M10 client deliberately does not calculate poker legality, reveal other players' cards, or
+implement action controls, host/admin controls, session controls, history, or deployment.
+
 ## 4. Milestone status
 
 | Milestone | Git history name | Status | Architectural result |
@@ -102,10 +127,11 @@ reimplement poker rules or become alternate sources of game truth.
 | M7 | `Implement Milestone 7 transport and identity` | COMPLETE, merged | Express/Socket.IO transport and credential-backed identity |
 | M8 | `Implement Milestone 8 connection lifecycle` | COMPLETE, merged | Disconnect/host/offline timers, Runout pacing, admin lifecycle |
 | M9 | `Implement Milestone 9 persistence recovery` | COMPLETE, merged | Prisma/SQLite checkpoints, durable identity/idempotency/recovery |
+| M10 | Web foundation | IMPLEMENTED | Browser entry/recovery shell, safe shared contracts, six-seat public table projection, and presence commands |
 
-Merged main milestones are visible in Git history from `cdf71e0` (M1) through `de44515`
-(M9). The next major phase is the React client and UX, followed by Railway deployment and
-polish. Neither phase is implemented merely because the server exists.
+Merged main milestones through M9 are visible in Git history from `cdf71e0` through `de44515`.
+The M10 web foundation is implemented in the current snapshot; gameplay controls and
+deployment remain future work.
 
 ## 5. Critical invariants
 
@@ -300,14 +326,16 @@ not technical debt to “fix” casually by persisting decks or private hole car
 
 ## 12. Current test baseline
 
-Verified on `main@de44515`:
+Verified on the M10 implementation snapshot based on `main@3d3685e`:
 
-- standard suite: **349 tests** total;
+- standard suite: **361 tests** total;
 - `apps/server`: **100 tests** across 9 test files;
+- `apps/web`: **12 tests** across 5 test files;
 - `packages/poker-engine`: **249 tests** across 28 test files;
 - exhaustive evaluator suite: **1 additional exhaustive test**;
-- GitHub Actions push CI for `de44515`: passed;
-- CI migration smoke step, `npm run db:migrate:deploy --workspace @friend-poker/server`: passed.
+- CI migration smoke step, `npm run db:migrate:deploy --workspace @friend-poker/server`, remains
+  part of the workflow;
+- the workflow also verifies the Web production build.
 
 CI uses Node 22 and runs `npm ci`, migration deploy, lint, typecheck, the standard suite, and
 the exhaustive suite. Useful local commands are:
@@ -317,6 +345,7 @@ npm test
 npm run test:exhaustive
 npm run typecheck
 npm run lint
+npm run build
 ```
 
 Run relevant focused tests while developing and the full checks before handoff. Never delete,
@@ -353,31 +382,31 @@ V1 excludes:
 - long-term analytics/rankings such as VPIP/PFR leaderboards;
 - distributed infrastructure, microservices, Redis, Kubernetes, and multi-replica operation.
 
-## 15. Known limitations after M9
+## 15. Known limitations after M10
 
-- No browser UI exists yet; `apps/web` has not been created.
+- M10 covers identity entry/recovery, presence, safe public projections, and the responsive
+  table shell; gameplay action controls are not implemented yet.
+- Host/admin/session controls, replenishment, hand history, Session summaries, and reactions
+  remain intentionally deferred.
 - Railway configuration is documented but the application has not been deployed by the
-  repository work through M9.
+  repository work through M10.
 - Persistence is deliberately constrained to SQLite and one process/replica.
 - A process crash during a hand rolls back that unfinished hand to the pre-hand checkpoint.
 - Exact persistent in-hand recovery is not supported and is intentionally out of scope.
 
 Do not list already-fixed M5–M9 review defects as current limitations.
 
-## 16. Next phase: React client and UX
+## 16. Next phase: gameplay controls and product UX
 
-The likely next implementation phase is React + TypeScript + Vite. Scope should be planned in
-a new approved milestone rather than started from this document. Expected client work includes:
+The next implementation phase should be planned in a new approved milestone rather than
+started from this document. Expected remaining client work includes:
 
-- nickname entry and credential recovery;
-- seat selection, six-seat oval table, and spectator state;
-- own hole cards, community board, pots/Side Pots, action state, and player status;
 - Fold/Check/Call/Bet/Raise/All-in controls using Raise-to semantics;
 - minimum Raise-to guidance and Pot quick buttons whose results are server-validated;
 - host controls, Session start/end, manual next-hand flow, chip adjustments, and kick/transfer;
 - replenishment, recent hand history, and Session summaries;
-- reconnect, offline, revocation, stale-command, and error feedback;
-- responsive desktop, tablet, mobile portrait, and mobile landscape layouts;
+- expanded reconnect, offline, revocation, stale-command, and error feedback across gameplay;
+- deeper responsive gameplay layouts and table-state transitions;
 - a sound toggle and lightweight state-driven animation;
 - fixed emoji reactions and approved rate-limit behavior in a later UI/transport increment.
 
