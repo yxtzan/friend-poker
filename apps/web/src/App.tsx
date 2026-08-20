@@ -23,6 +23,7 @@ export function App() {
       onRetryUncertain={() => void app.retryUncertainCommand()}
       reactions={app.reactions}
       reactionEggVisible={app.reactionEggVisible}
+      onReactionEggClose={app.closeReactionEgg}
       onReaction={app.sendReaction}
       soundEnabled={app.soundEnabled}
       onSoundEnabledChange={app.setSoundEnabled}

@@ -18,6 +18,7 @@ function appFixture(overrides: Partial<TableAppState> = {}): TableAppState {
     notice: null,
     reactions: [],
     reactionEggVisible: false,
+    closeReactionEgg: vi.fn(),
     soundEnabled: false,
     setNickname: vi.fn(),
     setPosition: vi.fn(),

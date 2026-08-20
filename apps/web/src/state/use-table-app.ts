@@ -57,6 +57,7 @@ export interface TableAppState {
   readonly uncertainCommand: { readonly commandId: string; readonly type: M11Command["type"] } | null;
   readonly reactions: readonly TableReactionEvent[];
   readonly reactionEggVisible: boolean;
+  readonly closeReactionEgg: () => void;
   readonly soundEnabled: boolean;
   readonly notice: string | null;
   readonly setNickname: (nickname: string) => void;
@@ -150,7 +151,6 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
   const projectionForSoundRef = useRef<SafeTableProjection | null>(null);
   const soundEnabledRef = useRef(soundEnabled);
   const reactionLimiterRef = useRef(new ReactionRateLimiter());
-  const reactionEggTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reactionTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const soundPlayerRef = useRef(new TableSoundPlayer());
   restoreRef.current = restore;
@@ -219,6 +219,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
       socket.on(TransportEvent.TableState, acceptAuthoritativeProjection);
       socket.on(TransportEvent.TableReaction, (reaction) => {
         setReactions((previous) => [...previous, reaction].slice(-12));
+        if (soundEnabledRef.current) soundPlayerRef.current.playReaction(reaction.emoji);
         const timer = setTimeout(() => {
           setReactions((previous) => previous.filter((candidate) => candidate.reactionId !== reaction.reactionId));
           reactionTimersRef.current.delete(reaction.reactionId);
@@ -267,11 +268,6 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     if (!decision.accepted) {
       if (decision.showEgg) {
         setReactionEggVisible(true);
-        if (reactionEggTimerRef.current !== null) clearTimeout(reactionEggTimerRef.current);
-        reactionEggTimerRef.current = setTimeout(() => {
-          setReactionEggVisible(false);
-          reactionEggTimerRef.current = null;
-        }, 1_000);
       }
       return;
     }
@@ -285,8 +281,11 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     if (enabled) soundPlayerRef.current.unlock();
   }, []);
 
+  const closeReactionEgg = useCallback((): void => {
+    setReactionEggVisible(false);
+  }, []);
+
   useEffect(() => () => {
-    if (reactionEggTimerRef.current !== null) clearTimeout(reactionEggTimerRef.current);
     for (const timer of reactionTimersRef.current.values()) clearTimeout(timer);
     reactionTimersRef.current.clear();
     soundPlayerRef.current.dispose();
@@ -449,6 +448,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     uncertainCommand,
     reactions,
     reactionEggVisible,
+    closeReactionEgg,
     soundEnabled,
     notice,
     setNickname: (nextNickname) => {

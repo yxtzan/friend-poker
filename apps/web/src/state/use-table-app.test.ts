@@ -10,11 +10,28 @@ import type { TableSocket } from "../api/socket.js";
 import { projectionFixture } from "../test/fixtures.js";
 import { useTableApp } from "./use-table-app.js";
 
+const soundMocks = vi.hoisted(() => ({
+  dispose: vi.fn(),
+  play: vi.fn(),
+  playReaction: vi.fn(),
+  unlock: vi.fn(),
+}));
+
+vi.mock("./sound.js", () => ({
+  TableSoundPlayer: class MockTableSoundPlayer {
+    public readonly dispose = soundMocks.dispose;
+    public readonly play = soundMocks.play;
+    public readonly playReaction = soundMocks.playReaction;
+    public readonly unlock = soundMocks.unlock;
+  },
+}));
+
 class FakeSocket {
   public active = true;
   public connected = false;
   readonly #listeners = new Map<string, ((...args: never[]) => void)[]>();
   public readonly emitted: M10ClientCommandInput[] = [];
+  public readonly emittedReactions: unknown[] = [];
   public readonly acknowledgements: ((result: CommandResult) => void)[] = [];
   public acknowledge: ((result: CommandResult) => void) | null = null;
 
@@ -26,6 +43,9 @@ class FakeSocket {
   }
 
   public emit(event: string, ...args: unknown[]): boolean {
+    if (event === TransportEvent.TableReaction) {
+      this.emittedReactions.push(args[0]);
+    }
     if (event === TransportEvent.TableCommand) {
       this.emitted.push(args[0] as M10ClientCommandInput);
       this.acknowledge = args[1] as (result: CommandResult) => void;
@@ -240,5 +260,85 @@ describe("useTableApp", () => {
 
     act(() => socket.trigger(TransportEvent.TableState, newer));
     await waitFor(() => expect(result.current.projection?.version).toBe(22));
+  });
+
+  it("keeps the local reaction popup open past cooldown and allows a future violation", async () => {
+    const socket = new FakeSocket();
+    const { result, unmount } = renderHook(() =>
+      useTableApp({
+        restoreIdentity: async () => identity,
+        createSocket: () => socket as unknown as TableSocket,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.phase).toBe("CONNECTING"));
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    try {
+      act(() => {
+        for (let index = 0; index < 4; index += 1) result.current.sendReaction("😂");
+        result.current.sendReaction("😂");
+      });
+      expect(socket.emittedReactions).toHaveLength(4);
+      expect(result.current.reactionEggVisible).toBe(true);
+
+      act(() => vi.advanceTimersByTime(1_500));
+      expect(result.current.reactionEggVisible).toBe(true);
+
+      act(() => result.current.closeReactionEgg());
+      expect(result.current.reactionEggVisible).toBe(false);
+      act(() => result.current.sendReaction("😂"));
+      expect(result.current.reactionEggVisible).toBe(false);
+
+      vi.setSystemTime(2_001);
+      act(() => {
+        for (let index = 0; index < 4; index += 1) result.current.sendReaction("😂");
+        result.current.sendReaction("😂");
+      });
+      expect(result.current.reactionEggVisible).toBe(true);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("plays each authoritative reaction once, never on click, and respects sound off", async () => {
+    soundMocks.playReaction.mockClear();
+    soundMocks.unlock.mockClear();
+    const socket = new FakeSocket();
+    const { result, unmount } = renderHook(() =>
+      useTableApp({
+        restoreIdentity: async () => identity,
+        createSocket: () => socket as unknown as TableSocket,
+      }),
+    );
+
+    await waitFor(() => expect(result.current.phase).toBe("CONNECTING"));
+    act(() => result.current.setSoundEnabled(true));
+    expect(soundMocks.unlock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      for (let index = 0; index < 4; index += 1) result.current.sendReaction("🔥");
+      result.current.sendReaction("🔥");
+    });
+    expect(soundMocks.playReaction).not.toHaveBeenCalled();
+    expect(socket.emittedReactions).toHaveLength(4);
+
+    act(() => socket.trigger(TransportEvent.TableReaction, {
+      reactionId: "reaction-1",
+      playerId: identity.playerId,
+      emoji: "🔥",
+    }));
+    expect(soundMocks.playReaction).toHaveBeenCalledTimes(1);
+    expect(soundMocks.playReaction).toHaveBeenLastCalledWith("🔥");
+
+    act(() => result.current.setSoundEnabled(false));
+    act(() => socket.trigger(TransportEvent.TableReaction, {
+      reactionId: "reaction-2",
+      playerId: "bob",
+      emoji: "👏",
+    }));
+    expect(soundMocks.playReaction).toHaveBeenCalledTimes(1);
+    unmount();
   });
 });

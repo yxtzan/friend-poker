@@ -216,4 +216,37 @@ describe("TableShell", () => {
     expect(screen.getByText("Alice：94")).toBeInTheDocument();
     expect(onCommand).toHaveBeenCalledWith({ type: "PREPARE_END_SESSION" });
   });
+
+  it("renders one persistent game-style reaction popup with close and Escape behavior", () => {
+    const onReactionEggClose = vi.fn();
+    const baseProps = {
+      projection: projectionFixture(),
+      viewerId: "alice",
+      phase: "CONNECTED" as const,
+      pendingCommand: null,
+      notice: null,
+      onCommand: vi.fn(),
+      onReactionEggClose,
+    };
+    const view = render(<TableShell {...baseProps} reactionEggVisible={false} />);
+    const reactionButton = screen.getByRole("button", { name: "发送表情😂" });
+    reactionButton.focus();
+
+    view.rerender(<TableShell {...baseProps} reactionEggVisible />);
+
+    expect(screen.getAllByRole("dialog", { name: "你急了" })).toHaveLength(1);
+    expect(screen.getByText("你急了")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "关闭“你急了”提示" })).toBeInTheDocument();
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "你急了" }));
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onReactionEggClose).toHaveBeenCalledTimes(1);
+
+    view.rerender(<TableShell {...baseProps} reactionEggVisible={false} />);
+    expect(document.activeElement).toBe(reactionButton);
+
+    view.rerender(<TableShell {...baseProps} reactionEggVisible />);
+    fireEvent.click(screen.getByRole("button", { name: "关闭“你急了”提示" }));
+    expect(onReactionEggClose).toHaveBeenCalledTimes(2);
+  });
 });

@@ -22,7 +22,7 @@ Build the Web client before starting the production server:
 BUILD:
 
 ```sh
-npm ci
+npm ci --include=dev
 npm run build
 ```
 
@@ -49,7 +49,7 @@ concurrency/Socket.IO/lifecycle redesign.
 From the repository root:
 
 ```sh
-npm ci
+npm ci --include=dev
 npm run db:migrate:deploy --workspace @friend-poker/server
 npm run lint
 npm run typecheck

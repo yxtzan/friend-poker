@@ -32,12 +32,14 @@ interface TableShellProps {
   readonly onRetryUncertain?: () => void;
   readonly reactions?: readonly TableReactionEvent[];
   readonly reactionEggVisible?: boolean;
+  readonly onReactionEggClose?: () => void;
   readonly onReaction?: (emoji: ReactionEmoji) => void;
   readonly soundEnabled?: boolean;
   readonly onSoundEnabledChange?: (enabled: boolean) => void;
 }
 
 const SEATS: readonly TableSeat[] = [0, 1, 2, 3, 4, 5];
+const NOOP_CLOSE_REACTION_EGG = (): void => undefined;
 
 function tableStatusLabel(status: SafeTableProjection["status"]): string {
   const labels: Record<SafeTableProjection["status"], string> = {
@@ -123,6 +125,7 @@ export function TableShell({
   onRetryUncertain = () => undefined,
   reactions = [],
   reactionEggVisible = false,
+  onReactionEggClose = NOOP_CLOSE_REACTION_EGG,
   onReaction = () => undefined,
   soundEnabled = false,
   onSoundEnabledChange = () => undefined,
@@ -131,6 +134,8 @@ export function TableShell({
   const rankingTriggerRef = useRef<HTMLButtonElement>(null);
   const handsTriggerRef = useRef<HTMLButtonElement>(null);
   const sessionsTriggerRef = useRef<HTMLButtonElement>(null);
+  const reactionEggTitleRef = useRef<HTMLHeadingElement>(null);
+  const reactionEggPreviousFocusRef = useRef<HTMLElement | null>(null);
   const hand = projection.currentHand;
   const viewerSeat = projection.seats.find((player) => player?.playerId === viewerId)?.seat ?? null;
   const viewerIsSpectator = viewerSeat === null;
@@ -147,6 +152,25 @@ export function TableShell({
   const floatingSpectatorReactions = reactions.filter(
     (reaction) => !projection.seats.some((player) => player?.playerId === reaction.playerId),
   );
+
+  useEffect(() => {
+    if (!reactionEggVisible || typeof document === "undefined") return;
+    const activeElement = document.activeElement;
+    reactionEggPreviousFocusRef.current = activeElement instanceof HTMLElement ? activeElement : null;
+    reactionEggTitleRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onReactionEggClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      const previousFocus = reactionEggPreviousFocusRef.current;
+      reactionEggPreviousFocusRef.current = null;
+      if (previousFocus?.isConnected === true) previousFocus.focus();
+    };
+  }, [onReactionEggClose, reactionEggVisible]);
 
   return (
     <main className="table-page">
@@ -195,7 +219,6 @@ export function TableShell({
         <div className="reaction-controls" aria-label="快捷表情">
           <span className="utility-label">回应</span>
           {(["😂", "😎", "😭", "🤔", "🔥", "👏"] as const).map((emoji) => <button type="button" className="reaction-button" aria-label={`发送表情${emoji}`} key={emoji} onClick={() => onReaction(emoji)}>{emoji}</button>)}
-          {reactionEggVisible && <span className="reaction-egg" role="status">你急了</span>}
         </div>
         {floatingSpectatorReactions.length > 0 && <div className="reaction-overflow" aria-label="最新回应">{floatingSpectatorReactions.map((reaction) => <span className="reaction-overflow-item" key={reaction.reactionId}>{reaction.emoji}</span>)}</div>}
       </section>
@@ -303,6 +326,29 @@ export function TableShell({
         {!viewerIsHost && projection.status !== TableLifecycleStatus.HandInProgress && projection.session !== null && <span className="muted-copy">等待房主决定下一步</span>}
         {hand !== null && hand.status === HandLifecycleStatus.Complete && <span className="muted-copy">本手结算完成</span>}
       </section>
+
+      {reactionEggVisible && (
+        <div className="reaction-egg-backdrop">
+          <section
+            className="reaction-egg-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reaction-egg-title"
+            data-testid="reaction-egg-dialog"
+          >
+            <button
+              type="button"
+              className="reaction-egg-close"
+              aria-label="关闭“你急了”提示"
+              onClick={onReactionEggClose}
+            >
+              ×
+            </button>
+            <div className="reaction-egg-spark" aria-hidden="true">✦</div>
+            <h2 id="reaction-egg-title" ref={reactionEggTitleRef} tabIndex={-1}>你急了</h2>
+          </section>
+        </div>
+      )}
 
       {viewerIsHost && (
         <HostControls
