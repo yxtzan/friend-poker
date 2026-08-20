@@ -14,11 +14,13 @@ function appFixture(overrides: Partial<TableAppState> = {}): TableAppState {
     position: { kind: "SPECTATOR" },
     canReenterAfterKick: false,
     pendingCommand: null,
+    uncertainCommand: null,
     notice: null,
     setNickname: vi.fn(),
     setPosition: vi.fn(),
     submitEntry: vi.fn(async () => undefined),
     submitCommand: vi.fn(async () => null),
+    retryUncertainCommand: vi.fn(async () => null),
     retry: vi.fn(),
     ...overrides,
   };

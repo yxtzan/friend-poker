@@ -29,15 +29,16 @@ afterEach(async () => {
 async function startedHand(
   clock: FakeLifecycleScheduler,
   playerCount = 3,
-  buttonSeat: 0 | 1 | 2 = 0,
+  hostSeat: 0 | 1 | 2 = 0,
 ): Promise<readonly ConnectedClient[]> {
   fixture = await createTransportFixture({ lifecycleScheduler: clock });
   const clients: ConnectedClient[] = [];
+  const seats = [hostSeat, ...([0, 1, 2] as const).filter((seat) => seat !== hostSeat)];
   for (let index = 0; index < playerCount; index += 1) {
     clients.push(
       await createConnectedClient(fixture, `Player${index + 1}`, {
         kind: "SEAT",
-        seat: index as 0 | 1 | 2,
+        seat: seats[index]!,
       }),
     );
   }
@@ -59,9 +60,7 @@ async function startedHand(
   const hand = await executeSocketCommand(
     host.socket,
     nextCommand(host.latestProjection, "lifecycle-hand", {
-      type: RuntimeCommandType.StartFirstHand,
-      handId: "lifecycle-hand",
-      buttonSeat,
+      type: "START_FIRST_HAND",
     }),
   );
   expect(hand.status).toBe("APPLIED");
@@ -247,7 +246,7 @@ describe("deterministic disconnected-turn lifecycle", () => {
     const newHandVersion = serverProjection().version;
     clock.advanceBy(60_000);
     await fixture!.server.settleLifecycle();
-    expect(serverProjection().currentHand?.handId).toBe("lifecycle-hand-2");
+    expect(serverProjection().currentHand?.handId).toContain("new-hand-after-stale-timer");
     expect(serverProjection().version).toBe(newHandVersion);
   });
 
@@ -382,8 +381,12 @@ describe("deterministic host grace and paced Runout", () => {
       seat: 0,
     });
     host.socket.disconnect();
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    await fixture.server.settleLifecycle();
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      await fixture.server.settleLifecycle();
+      if (serverProjection().seats[0]?.online === false) break;
+    }
+    expect(serverProjection().seats[0]?.online).toBe(false);
     clock.advanceBy(60_000);
     await fixture.server.settleLifecycle();
     expect(serverProjection().hostPlayerId).toBeNull();
@@ -545,7 +548,7 @@ describe("deterministic host grace and paced Runout", () => {
     const version = serverProjection().version;
     clock.fireCancelledCallbacks();
     await fixture!.server.settleLifecycle();
-    expect(serverProjection().currentHand?.handId).toBe("hand-after-cancelled-runout");
+    expect(serverProjection().currentHand?.handId).toContain("hand-after-cancelled-runout");
     expect(serverProjection().version).toBe(version);
   });
 });

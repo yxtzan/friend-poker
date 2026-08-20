@@ -10,5 +10,7 @@ page or dashboard.
 - Density: keep useful values close to the object they describe; avoid repeated labels, dashboard cards, and decorative explanation.
 - Shape: oval table, rail-attached seat plates, card proportions, circular dealer marker, restrained rectangular controls.
 - Seat relationship: every seat is spatially attached to the rail; the viewer seat and hole cards remain visibly connected to that seat.
+- Gameplay dock: current-viewer actions sit immediately below the felt, expose only server-approved legal actions, and use one compact Raise-to control with Pot quick buttons.
+- Host controls: Session and host-management actions stay in a collapsible secondary rail below presence; destructive actions require an explicit confirmation surface.
 - Responsive behavior: preserve the same table and spatial relationships on desktop, portrait, and landscape; compress metadata before shrinking gameplay information into illegibility.
 - Avoid: marketing heroes, SaaS eyebrow copy, card walls, excessive pills, glassmorphism, neon casino styling, generic dashboard panels, and decorative copy that explains obvious UI.

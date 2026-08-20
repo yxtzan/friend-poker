@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CommandResult,
   IdentityResponse,
-  M10Command,
+  M11Command,
   SafeTableProjection,
 } from "@friend-poker/shared";
 import {
@@ -15,6 +15,9 @@ import {
 } from "../api/identity.js";
 import {
   CommandAcknowledgementTimeoutError,
+  CommandReconciledByProjectionError,
+  UncertainCommandError,
+  UncertainCommandRetryLimitError,
   TableCommandClient,
 } from "../api/commands.js";
 import { connectToTable, type TableSocket } from "../api/socket.js";
@@ -46,12 +49,14 @@ export interface TableAppState {
   readonly nickname: string;
   readonly position: EntryPosition;
   readonly canReenterAfterKick: boolean;
-  readonly pendingCommand: M10Command["type"] | null;
+  readonly pendingCommand: M11Command["type"] | null;
+  readonly uncertainCommand: { readonly commandId: string; readonly type: M11Command["type"] } | null;
   readonly notice: string | null;
   readonly setNickname: (nickname: string) => void;
   readonly setPosition: (position: EntryPosition) => void;
   readonly submitEntry: () => Promise<void>;
-  readonly submitCommand: (command: M10Command) => Promise<CommandResult | null>;
+  readonly submitCommand: (command: M11Command) => Promise<CommandResult | null>;
+  readonly retryUncertainCommand: () => Promise<CommandResult | null>;
   readonly retry: () => void;
 }
 
@@ -81,6 +86,15 @@ function socketErrorMessage(error: Error & { readonly data?: { readonly code?: s
   return "无法连接牌桌服务器，请稍后重试";
 }
 
+function uncertainCommandState(
+  client: TableCommandClient | null,
+): TableAppState["uncertainCommand"] {
+  const unresolved = client?.uncertainCommand;
+  return unresolved === null || unresolved === undefined
+    ? null
+    : { commandId: unresolved.commandId, type: unresolved.command.type };
+}
+
 export function useTableApp(options: TableAppOptions = {}): TableAppState {
   const restore = options.restoreIdentity ?? attemptIdentityRecovery;
   const enter = options.enterIdentity ?? enterIdentity;
@@ -91,7 +105,8 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
   const [nickname, setNickname] = useState(savedNickname);
   const [position, setPosition] = useState<EntryPosition>({ kind: "SPECTATOR" });
   const [canReenterAfterKick, setCanReenterAfterKick] = useState(false);
-  const [pendingCommand, setPendingCommand] = useState<M10Command["type"] | null>(null);
+  const [pendingCommand, setPendingCommand] = useState<M11Command["type"] | null>(null);
+  const [uncertainCommand, setUncertainCommand] = useState<TableAppState["uncertainCommand"]>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const projectionRef = useRef<SafeTableProjection | null>(null);
   const socketRef = useRef<TableSocket | null>(null);
@@ -108,6 +123,8 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
   commandAckTimeoutRef.current = options.commandAckTimeoutMs;
 
   const acceptAuthoritativeProjection = useCallback((next: SafeTableProjection): void => {
+    commandClientRef.current?.observeProjection(next);
+    setUncertainCommand(uncertainCommandState(commandClientRef.current));
     setProjection((previous) => {
       const accepted = acceptProjection(previous, next);
       projectionRef.current = accepted;
@@ -128,6 +145,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
           ? {}
           : { ackTimeoutMs: commandAckTimeoutRef.current }),
       });
+      setUncertainCommand(null);
       setIdentity(nextIdentity);
       setPhase("CONNECTING");
       socket.on(TransportEvent.TableState, acceptAuthoritativeProjection);
@@ -154,6 +172,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
         socket.disconnect();
         setProjection(null);
         setIdentity(null);
+        setUncertainCommand(null);
         setPhase(event.reason === "SESSION_ENDED" ? "SESSION_ENDED" : "REVOKED");
         setNotice(
           event.reason === "SESSION_ENDED"
@@ -233,7 +252,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     }
   }, [canReenterAfterKick, connectSocket, nickname, position]);
 
-  const submitCommand = useCallback(async (command: M10Command): Promise<CommandResult | null> => {
+  const submitCommand = useCallback(async (command: M11Command): Promise<CommandResult | null> => {
     const commandClient = commandClientRef.current;
     if (commandClient === null) {
       setNotice("牌桌尚未连接");
@@ -242,6 +261,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     setPendingCommand(command.type);
     try {
       const result = await commandClient.submit(command);
+      setUncertainCommand(null);
       if (result.status === "REJECTED") {
         setNotice(commandErrorMessage(result.reason, result.message));
       } else if (result.status === "DUPLICATE") {
@@ -258,7 +278,10 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
       return result;
     } catch (error) {
       if (error instanceof CommandAcknowledgementTimeoutError) {
+        setUncertainCommand(uncertainCommandState(commandClient));
         setNotice("操作确认超时，服务器可能已经处理；请以最新牌桌状态为准");
+      } else if (error instanceof UncertainCommandError) {
+        setNotice("上一条操作尚未确认，请先重新确认");
       } else {
         setNotice("操作未能送达服务器，请检查连接");
       }
@@ -268,6 +291,40 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     }
   }, []);
 
+  const retryUncertainCommand = useCallback(async (): Promise<CommandResult | null> => {
+    const commandClient = commandClientRef.current;
+    if (commandClient === null) {
+      setNotice("牌桌尚未连接");
+      return null;
+    }
+    setPendingCommand(uncertainCommand?.type ?? null);
+    try {
+      const result = await commandClient.retryUncertain();
+      setUncertainCommand(uncertainCommandState(commandClient));
+      if (result.status === "REJECTED") {
+        setNotice(commandErrorMessage(result.reason, result.message));
+      } else if (result.status === "DUPLICATE") {
+        setNotice("服务器已处理原操作，已恢复同步");
+      } else {
+        setNotice(null);
+      }
+      return result;
+    } catch (error) {
+      if (error instanceof UncertainCommandRetryLimitError) {
+        setNotice(error.message);
+      } else if (error instanceof CommandReconciledByProjectionError) {
+        setUncertainCommand(null);
+        setNotice("牌桌状态已更新，上一条操作已结束");
+      } else {
+        setNotice("重新确认未完成，请等待新的牌桌状态");
+      }
+      return null;
+    } finally {
+      setUncertainCommand(uncertainCommandState(commandClient));
+      setPendingCommand(null);
+    }
+  }, [uncertainCommand]);
+
   return {
     phase,
     identity,
@@ -275,6 +332,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     nickname,
     position,
     pendingCommand,
+    uncertainCommand,
     notice,
     setNickname: (nextNickname) => {
       setNickname(nextNickname);
@@ -284,6 +342,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     canReenterAfterKick,
     submitEntry,
     submitCommand,
+    retryUncertainCommand,
     retry: boot,
   };
 }

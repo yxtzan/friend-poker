@@ -17,8 +17,10 @@ export function App() {
       viewerId={app.identity.playerId}
       phase={app.phase}
       pendingCommand={app.pendingCommand}
+      uncertainCommand={app.uncertainCommand}
       notice={app.notice}
-      onCommand={(command) => void app.submitCommand(command)}
+      onCommand={(command) => app.submitCommand(command)}
+      onRetryUncertain={() => void app.retryUncertainCommand()}
     />
   );
 }

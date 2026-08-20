@@ -209,5 +209,10 @@ export async function foldUntilComplete(fixture: RuntimeFixture): Promise<void> 
 }
 
 export function publicProjection(projection: SafeTableProjection) {
-  return Object.freeze({ ...projection, ownHoleCards: null });
+  return Object.freeze({
+    ...projection,
+    ownHoleCards: null,
+    viewerLegalActions: null,
+    viewerCanRevealUncontested: false,
+  });
 }

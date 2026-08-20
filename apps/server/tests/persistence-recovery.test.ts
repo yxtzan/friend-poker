@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { PlayerActionType, TableLifecycleStatus } from "@friend-poker/poker-engine";
+import { TableLifecycleStatus } from "@friend-poker/poker-engine";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { PrismaClient } from "../src/generated/prisma/client.js";
@@ -112,14 +112,27 @@ function clientById(clients: readonly ConnectedClient[], playerId: string): Conn
 
 describe("durable checkpoint recovery", () => {
   it("rolls an unfinished hand back to the pre-hand checkpoint", async () => {
-    const clients = await createSeatedPlayers(3);
+    const clients: ConnectedClient[] = [];
+    clients.push(
+      await createConnectedClient(fixture!, "Persist1", { kind: "SEAT", seat: 1 }),
+      await createConnectedClient(fixture!, "Persist2", { kind: "SEAT", seat: 0 }),
+      await createConnectedClient(fixture!, "Persist3", { kind: "SEAT", seat: 2 }),
+    );
+    await synchronizeClients(clients);
     const started = await startSession(clients, "rollback");
     const preHandBalances = Object.fromEntries(
       started.projection.seats
         .filter((player) => player !== null)
         .map((player) => [player.playerId, player.chipBalance]),
     );
-    let active = await startFirstHand(clients, "rollback");
+    const firstHandEnvelope = nextCommand(
+      clients[0]!.latestProjection,
+      "start-hand-rollback",
+      { type: "START_FIRST_HAND" },
+    );
+    let active = await executeSocketCommand(clients[0]!.socket, firstHandEnvelope);
+    expect(active.status).toBe("APPLIED");
+    expect(active.projection.currentHand?.buttonSeat).toBe(0);
 
     for (let actionIndex = 0; actionIndex < 2; actionIndex += 1) {
       const hand = active.projection.currentHand;
@@ -130,13 +143,10 @@ describe("durable checkpoint recovery", () => {
       active = await executeSocketCommand(clientById(clients, hand.currentActorId).socket, {
         commandId: `rollback-action-${actionIndex}`,
         expectedVersion: active.version,
-        command: {
-          type: RuntimeCommandType.PokerAction,
-          action:
-            actor.streetContribution === hand.currentBet
-              ? { type: PlayerActionType.Check }
-              : { type: PlayerActionType.Call },
-        },
+        command:
+          actor.streetContribution === hand.currentBet
+            ? { type: "CHECK" }
+            : { type: "CALL" },
       });
       expect(active.status).toBe("APPLIED");
     }
@@ -154,7 +164,7 @@ describe("durable checkpoint recovery", () => {
     expect(recovered.status).toBe(TableLifecycleStatus.WaitingForFirstHand);
     expect(recovered.currentHand).toBeNull();
     expect(recovered.recentHands).toHaveLength(0);
-    expect(recovered.session?.sessionId).toBe("session-rollback");
+    expect(recovered.session?.sessionId).toContain("session-rollback");
     expect(recovered.hostPlayerId).toBe(playerIds[0]);
     for (const playerId of playerIds) {
       expect(findPublicPlayer(recovered, playerId)).toMatchObject({
@@ -163,7 +173,22 @@ describe("durable checkpoint recovery", () => {
       });
     }
 
-    for (let index = 0; index < cookies.length; index += 1) {
+    const recoveredHost = await connectWithCookie(fixture!, cookies[0]!);
+    const retriedStart = await executeSocketCommand(recoveredHost.socket, firstHandEnvelope);
+    expect(retriedStart.status).toBe("DUPLICATE");
+    expect(retriedStart.projection.status).toBe(TableLifecycleStatus.WaitingForFirstHand);
+    expect(retriedStart.projection.currentHand).toBeNull();
+    expect(
+      retriedStart.projection.seats
+        .filter((player) => player !== null)
+        .map((player) => player.chipBalance),
+    ).toEqual(
+      recovered.seats
+        .filter((player) => player !== null)
+        .map((player) => player.chipBalance),
+    );
+
+    for (let index = 1; index < cookies.length; index += 1) {
       const connected = await connectWithCookie(fixture!, cookies[index]!);
       expect(findPublicPlayer(connected.initialProjection, playerIds[index]!)).toMatchObject({
         playerId: playerIds[index],
@@ -180,10 +205,7 @@ describe("durable checkpoint recovery", () => {
     const completed = await executeSocketCommand(clientById(clients, actorId).socket, {
       commandId: "complete-by-fold",
       expectedVersion: active.version,
-      command: {
-        type: RuntimeCommandType.PokerAction,
-        action: { type: PlayerActionType.Fold },
-      },
+      command: { type: "FOLD" },
     });
     expect(completed.status).toBe("APPLIED");
     expect(completed.projection.status).toBe(TableLifecycleStatus.BetweenHands);
@@ -246,10 +268,7 @@ describe("durable checkpoint recovery", () => {
       const folded = await executeSocketCommand(clientById(clients, actorId).socket, {
         commandId: `retention-fold-${handIndex}`,
         expectedVersion: start.version,
-        command: {
-          type: RuntimeCommandType.PokerAction,
-          action: { type: PlayerActionType.Fold },
-        },
+        command: { type: "FOLD" },
       });
       expect(folded.status).toBe("APPLIED");
       completed = folded.projection;
@@ -275,18 +294,15 @@ describe("durable checkpoint recovery", () => {
     const twentyFirst = await executeSocketCommand(actorSocket, {
       commandId: "retention-fold-20",
       expectedVersion: nextStart.version,
-      command: {
-        type: RuntimeCommandType.PokerAction,
-        action: { type: PlayerActionType.Fold },
-      },
+      command: { type: "FOLD" },
     });
     expect(twentyFirst.projection.recentHands).toHaveLength(20);
     expect(
       twentyFirst.projection.recentHands.some(
-        (entry) => entry.record.handId === "retention-hand-0",
+        (entry) => entry.record.handId.includes("retention-start-0"),
       ),
     ).toBe(false);
-    expect(twentyFirst.projection.recentHands.at(-1)?.record.handId).toBe("retention-hand-20");
+    expect(twentyFirst.projection.recentHands.at(-1)?.record.handId).toContain("retention-start-20");
 
     async function endCurrentSession(
       socket: typeof hostSocket,
@@ -334,7 +350,7 @@ describe("durable checkpoint recovery", () => {
     expect(
       twentyFirstSession.recentSessions.some((entry) => entry.sessionId === "session-retention-0"),
     ).toBe(false);
-    expect(twentyFirstSession.recentSessions.at(-1)?.sessionId).toBe("session-retention-20");
+    expect(twentyFirstSession.recentSessions.at(-1)?.sessionId).toContain("session-retention-20");
   }, 120_000);
 });
 
@@ -458,10 +474,7 @@ describe("durable command idempotency", () => {
     const input = {
       commandId: "durable-replenish",
       expectedVersion: zeroed.version,
-      command: {
-        type: RuntimeCommandType.Replenish,
-        ledgerEntryId: "durable-replenish-ledger",
-      },
+      command: { type: "REPLENISH" },
     } as const;
     const applied = await executeSocketCommand(player!.socket, input);
     expect(applied.status).toBe("APPLIED");
@@ -475,7 +488,7 @@ describe("durable command idempotency", () => {
 
     const collision = await executeSocketCommand(restored.socket, {
       ...input,
-      command: { ...input.command, ledgerEntryId: "changed-ledger" },
+      command: { type: "STAND_TO_SPECTATE" },
     });
     expect(collision).toMatchObject({ status: "REJECTED", reason: "INVALID_COMMAND" });
   });
@@ -499,7 +512,10 @@ describe("durable command idempotency", () => {
     expect(findPublicPlayer(duplicate.projection, player!.identity.playerId)?.chipBalance).toBe(117);
     expect(
       duplicate.projection.session?.ledger.filter(
-        (entry) => entry.ledgerEntryId === "durable-adjust-ledger",
+        (entry) =>
+          entry.playerId === player!.identity.playerId &&
+          entry.type === "HOST_ADJUSTMENT" &&
+          entry.amount === 17,
       ),
     ).toHaveLength(1);
   });

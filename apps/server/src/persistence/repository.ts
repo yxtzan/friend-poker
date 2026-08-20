@@ -43,6 +43,7 @@ export interface VersionHighWaterCommit {
   readonly runtimeVersion: number;
   readonly identityGeneration?: number;
   readonly identities?: readonly DurableIdentityRecord[];
+  readonly processedCommand?: RuntimeProcessedCommandRecord;
 }
 
 function parseCommandData(serialized: string): RuntimeCommandData {
@@ -270,6 +271,19 @@ export class PrismaPersistenceRepository {
         if (input.identities.length > 0) {
           await transaction.identity.createMany({ data: [...input.identities] });
         }
+      }
+      if (input.processedCommand !== undefined) {
+        await transaction.processedCommand.create({
+          data: {
+            commandId: input.processedCommand.commandId,
+            principalKey: input.processedCommand.principalKey,
+            fingerprint: input.processedCommand.fingerprint,
+            originalVersion: input.processedCommand.originalVersion,
+            originalStatus: input.processedCommand.originalStatus,
+            dataJson: JSON.stringify(input.processedCommand.data),
+          },
+        });
+        await this.#pruneProcessedCommands(transaction);
       }
     });
   }

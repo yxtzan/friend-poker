@@ -129,6 +129,24 @@ export interface SessionProjection {
   readonly ledger: readonly PublicLedgerEntryProjection[];
 }
 
+export interface ViewerLegalActions {
+  readonly playerId: PlayerId;
+  readonly canFold: boolean;
+  readonly canCheck: boolean;
+  readonly canCall: boolean;
+  readonly callAmount: number;
+  readonly callIsAllIn: boolean;
+  readonly canBet: boolean;
+  readonly minimumBet: number | null;
+  readonly maximumBet: number | null;
+  readonly canRaise: boolean;
+  readonly minimumRaiseTo: number | null;
+  readonly maximumRaiseTo: number | null;
+  readonly raiseRightsOpen: boolean;
+  readonly canAllIn: boolean;
+  readonly allInTo: number;
+}
+
 export interface PublicSessionPlayerSummary {
   readonly playerId: PlayerId;
   readonly initialGrants: number;
@@ -278,6 +296,8 @@ export interface SafeTableProjection {
   readonly spectators: readonly PublicPlayerProjection[];
   readonly session: SessionProjection | null;
   readonly currentHand: CurrentHandProjection | null;
+  readonly viewerLegalActions: ViewerLegalActions | null;
+  readonly viewerCanRevealUncontested: boolean;
   readonly ownHoleCards: readonly [Card, Card] | null;
   readonly recentHands: readonly PublicTableHandRecord[];
   readonly recentSessions: readonly PublicSessionSummary[];
@@ -319,6 +339,84 @@ export interface M10ClientCommandInput {
   readonly commandId: string;
   readonly expectedVersion: number;
   readonly command: M10Command;
+}
+
+export const M11CommandType = Object.freeze({
+  Sit: "SIT",
+  StandToSpectate: "STAND_TO_SPECTATE",
+  LeaveTable: "LEAVE_TABLE",
+  Fold: "FOLD",
+  Check: "CHECK",
+  Call: "CALL",
+  Bet: "BET",
+  Raise: "RAISE",
+  AllIn: "ALL_IN",
+  RevealUncontested: "REVEAL_UNCONTESTED",
+  Replenish: "REPLENISH",
+  StartSession: "START_SESSION",
+  StartFirstHand: "START_FIRST_HAND",
+  StartNextHand: "START_NEXT_HAND",
+  ChangeBlinds: "CHANGE_BLINDS",
+  HostAdjustChips: "HOST_ADJUST_CHIPS",
+  TransferHost: "TRANSFER_HOST",
+  Kick: "KICK",
+  HostForceFold: "HOST_FORCE_FOLD",
+  PrepareEndSession: "PREPARE_END_SESSION",
+  EndSession: "END_SESSION",
+} as const);
+
+export type M11CommandType =
+  (typeof M11CommandType)[keyof typeof M11CommandType];
+
+export interface PublicSessionEndPreview {
+  readonly sessionId: string;
+  readonly completedHandCount: number;
+  readonly participantPlayerIds: readonly PlayerId[];
+  readonly finalChipBalances: Readonly<Record<PlayerId, number>>;
+}
+
+export type M11Command =
+  | M10Command
+  | { readonly type: typeof M11CommandType.Fold }
+  | { readonly type: typeof M11CommandType.Check }
+  | { readonly type: typeof M11CommandType.Call }
+  | { readonly type: typeof M11CommandType.Bet; readonly amount: number }
+  | { readonly type: typeof M11CommandType.Raise; readonly raiseTo: number }
+  | { readonly type: typeof M11CommandType.AllIn }
+  | { readonly type: typeof M11CommandType.RevealUncontested }
+  | { readonly type: typeof M11CommandType.Replenish }
+  | { readonly type: typeof M11CommandType.StartSession }
+  | { readonly type: typeof M11CommandType.StartFirstHand }
+  | { readonly type: typeof M11CommandType.StartNextHand }
+  | {
+      readonly type: typeof M11CommandType.ChangeBlinds;
+      readonly smallBlind: number;
+      readonly bigBlind: number;
+    }
+  | {
+      readonly type: typeof M11CommandType.HostAdjustChips;
+      readonly targetPlayerId: PlayerId;
+      readonly amount: number;
+    }
+  | {
+      readonly type: typeof M11CommandType.TransferHost;
+      readonly targetPlayerId: PlayerId;
+    }
+  | { readonly type: typeof M11CommandType.Kick; readonly targetPlayerId: PlayerId }
+  | {
+      readonly type: typeof M11CommandType.HostForceFold;
+      readonly targetPlayerId: PlayerId;
+    }
+  | { readonly type: typeof M11CommandType.PrepareEndSession }
+  | {
+      readonly type: typeof M11CommandType.EndSession;
+      readonly confirmation: PublicSessionEndPreview;
+    };
+
+export interface M11ClientCommandInput {
+  readonly commandId: string;
+  readonly expectedVersion: number;
+  readonly command: M11Command;
 }
 
 export type CommandRejectionReason =
@@ -373,6 +471,13 @@ export interface ServerToClientEvents {
 export interface M10ClientToServerEvents {
   TABLE_COMMAND: (
     input: M10ClientCommandInput,
+    acknowledge: (result: CommandResult) => void,
+  ) => void;
+}
+
+export interface M11ClientToServerEvents {
+  TABLE_COMMAND: (
+    input: M11ClientCommandInput,
     acknowledge: (result: CommandResult) => void,
   ) => void;
 }

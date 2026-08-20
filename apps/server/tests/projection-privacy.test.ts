@@ -151,6 +151,48 @@ describe("per-viewer private-card projection", () => {
     ).toEqual(["A", "B"]);
   });
 
+  it("projects legal actions only to the current player", async () => {
+    const fixture = await startedRuntime(["A", "B", "C"]);
+    await startFirstHand(fixture);
+    const hand = fixture.system.projection().currentHand!;
+    const actorId = hand.currentActorId!;
+    const otherId = ["A", "B", "C"].find((playerId) => playerId !== actorId)!;
+
+    const actorActions = fixture.clients[actorId]!.projection().viewerLegalActions;
+    expect(actorActions).not.toBeNull();
+    expect(actorActions).toMatchObject({
+      playerId: actorId,
+      canFold: true,
+      callAmount: expect.any(Number),
+      allInTo: expect.any(Number),
+    });
+    expect(fixture.clients[otherId]!.projection().viewerLegalActions).toBeNull();
+    expect(fixture.runtime.getProjection({ kind: "SPECTATOR" }).viewerLegalActions).toBeNull();
+
+    await fixture.clients[actorId]!.execute({
+      type: RuntimeCommandType.PokerAction,
+      action: { type: PlayerActionType.Fold },
+    });
+    expect(fixture.clients[actorId]!.projection().viewerLegalActions).toBeNull();
+    expect(JSON.stringify(actorActions)).not.toMatch(/remainingDeck|privateHoleCards|bettingState/iu);
+  });
+
+  it("projects uncontested reveal only to the hand winner", async () => {
+    const fixture = await startedRuntime(["A", "B"]);
+    await startFirstHand(fixture);
+    const actorId = fixture.system.projection().currentHand!.currentActorId!;
+    const winnerId = actorId === "A" ? "B" : "A";
+
+    await fixture.clients[actorId]!.execute({
+      type: RuntimeCommandType.PokerAction,
+      action: { type: PlayerActionType.Fold },
+    });
+
+    expect(fixture.clients[winnerId]!.projection().viewerCanRevealUncontested).toBe(true);
+    expect(fixture.clients[actorId]!.projection().viewerCanRevealUncontested).toBe(false);
+    expect(fixture.runtime.getProjection({ kind: "SPECTATOR" }).viewerCanRevealUncontested).toBe(false);
+  });
+
   it("lets a folded player retain only their own cards until the hand completes", async () => {
     const fixture = await startedRuntime(["A", "B", "C"]);
     await startFirstHand(fixture);
@@ -203,6 +245,9 @@ describe("revealed-card and history boundaries", () => {
     const hiddenProjection = fixture.system.projection();
 
     expect(hiddenProjection.recentHands.at(-1)?.record.revealedHoleCards).toEqual([]);
+    expect(fixture.clients[winnerId]!.projection().viewerCanRevealUncontested).toBe(true);
+    expect(fixture.clients[foldingId]!.projection().viewerCanRevealUncontested).toBe(false);
+    expect(fixture.runtime.getProjection({ kind: "SPECTATOR" }).viewerCanRevealUncontested).toBe(false);
     expectExcludesCards(hiddenProjection, cards.A!);
     expectExcludesCards(hiddenProjection, cards.B!);
 

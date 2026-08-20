@@ -53,7 +53,6 @@ export type {
   TableViewer,
 } from "./runtime/types.js";
 export type {
-  ClientRuntimeCommand,
   ClientCommandInput,
   ClientToServerEvents,
   EntryPosition,

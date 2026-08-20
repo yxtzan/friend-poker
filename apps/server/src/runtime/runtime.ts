@@ -11,6 +11,7 @@ import {
   createTableState,
   endSession,
   enterTable,
+  getEligiblePlayers,
   kickPlayer,
   leaveTable,
   PlayerActionType,
@@ -30,6 +31,7 @@ import type {
   DomainMetadata,
   HandCommand,
   PlayerId,
+  TableSeat,
   TableState,
 } from "@friend-poker/poker-engine";
 import { projectTableState } from "./projection.js";
@@ -90,6 +92,16 @@ interface AppliedCommand {
 }
 
 class InvalidRuntimeCommandError extends Error {}
+
+function trustedFirstHandButton(state: TableState): TableSeat {
+  const previousButton = state.session?.lastButtonSeat;
+  if (previousButton !== null && previousButton !== undefined) return previousButton;
+  const firstEligible = getEligiblePlayers(state)[0]?.seat;
+  if (firstEligible === null || firstEligible === undefined) {
+    throw new InvalidRuntimeCommandError("No eligible player is available for the first Button");
+  }
+  return firstEligible;
+}
 
 function principalKey(principal: RuntimePrincipal): string {
   return principal.kind === "PLAYER"
@@ -464,7 +476,7 @@ export class SingleTableRuntime {
             {
               operatorPlayerId: playerId,
               handId: command.handId,
-              buttonSeat: command.buttonSeat,
+              buttonSeat: command.buttonSeat ?? trustedFirstHandButton(this.#state),
             },
             this.#rngForHand(command.handId),
           ),
