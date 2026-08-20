@@ -266,13 +266,13 @@ h1 { margin-bottom: 0; letter-spacing: -0.035em; }
 .reaction-overflow { display: flex; gap: 4px; margin-left: auto; }
 .reaction-overflow-item { font-size: 1.1rem; animation: reaction-float 2.4s ease-out forwards; }
 .seat-reaction { position: absolute; top: -25px; left: 50%; z-index: 6; pointer-events: none; font-size: 1.55rem; filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.35)); animation: reaction-float 2.4s ease-out forwards; }
-.reaction-egg-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 20px; background: rgba(3, 8, 5, 0.62); }
-.reaction-egg-dialog { position: relative; display: grid; width: min(280px, calc(100vw - 32px)); min-height: 164px; place-items: center; padding: 38px 30px 28px; border: 1px solid rgba(232, 145, 140, 0.62); border-radius: 12px; color: #fff1e8; background: radial-gradient(circle at 50% 35%, rgba(142, 66, 57, 0.48), transparent 58%), linear-gradient(145deg, #291c1a, #171512 78%); box-shadow: 0 22px 70px rgba(0, 0, 0, 0.58), 0 0 0 5px rgba(113, 58, 56, 0.14); animation: reaction-egg-in 180ms ease-out; }
-.reaction-egg-dialog h2 { margin: 0; color: #ffe3c5; font-size: clamp(2rem, 9vw, 3.1rem); font-weight: 900; letter-spacing: 0.08em; line-height: 1; text-shadow: 0 3px 0 #713a38, 0 8px 22px rgba(0, 0, 0, 0.46); }
+.reaction-egg-backdrop { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 20px; background: rgba(3, 8, 5, 0.62); -webkit-tap-highlight-color: transparent; }
+.reaction-egg-dialog { position: relative; display: grid; width: min(280px, calc(100vw - 32px)); min-height: 164px; place-items: center; padding: 38px 30px 28px; border: 1px solid rgba(232, 145, 140, 0.62); border-radius: 12px; color: #fff1e8; background: radial-gradient(circle at 50% 35%, rgba(142, 66, 57, 0.48), transparent 58%), linear-gradient(145deg, #291c1a, #171512 78%); box-shadow: 0 22px 70px rgba(0, 0, 0, 0.58), 0 0 0 5px rgba(113, 58, 56, 0.14); animation: reaction-egg-in 180ms ease-out; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+.reaction-egg-dialog h2 { margin: 0; color: #ffe3c5; font-size: clamp(2rem, 9vw, 3.1rem); font-weight: 900; letter-spacing: 0.08em; line-height: 1; text-shadow: 0 3px 0 #713a38, 0 8px 22px rgba(0, 0, 0, 0.46); pointer-events: none; }
 .reaction-egg-dialog h2:focus { outline: 2px solid rgba(223, 182, 110, 0.85); outline-offset: 7px; }
 .reaction-egg-close { position: absolute; top: 8px; right: 9px; display: grid; width: 28px; height: 28px; place-items: center; padding: 0; border: 1px solid rgba(255, 240, 220, 0.26); border-radius: 50%; color: #f2cfc0; background: rgba(17, 12, 11, 0.45); font-size: 1.1rem; line-height: 1; }
 .reaction-egg-close:hover { border-color: #e8918c; color: #fff3e7; background: rgba(113, 58, 56, 0.72); }
-.reaction-egg-spark { position: absolute; top: 29px; left: 31px; color: #e8918c; font-size: 0.9rem; transform: rotate(-18deg); }
+.reaction-egg-spark { position: absolute; top: 29px; left: 31px; color: #e8918c; font-size: 0.9rem; transform: rotate(-18deg); pointer-events: none; }
 .occupied-seat { transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease; }
 .playing-card:not(.card-empty):not(.card-back) { animation: card-appear 180ms ease-out; }
 .pot-display strong { transition: color 180ms ease, transform 180ms ease; }
