@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { CommandResult, M11Command } from "@friend-poker/shared";
 import { TableShell } from "./table-shell.js";
 import { projectionFixture } from "../test/fixtures.js";
 
@@ -132,5 +133,87 @@ describe("TableShell", () => {
     expect(screen.getByRole("button", { name: /加注 Raise/ })).toBeInTheDocument();
     expect(screen.getByText(/最低 12 · 最高 94/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^过牌/ })).not.toBeInTheDocument();
+  });
+
+  it("renders the projected Check, Bet, and All-in actions without inventing legality", () => {
+    render(
+      <TableShell
+        projection={projectionFixture({
+          viewerLegalActions: {
+            playerId: "alice",
+            canFold: true,
+            canCheck: true,
+            canCall: false,
+            callAmount: 0,
+            callIsAllIn: false,
+            canBet: true,
+            minimumBet: 2,
+            maximumBet: 94,
+            canRaise: false,
+            minimumRaiseTo: null,
+            maximumRaiseTo: null,
+            raiseRightsOpen: true,
+            canAllIn: true,
+            allInTo: 94,
+          },
+        })}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        notice={null}
+        onCommand={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /过牌 Check/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /下注 Bet/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /全下 94/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /跟注/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps Session stage controls manual and shows the authoritative end preview", async () => {
+    const projection = projectionFixture({ status: "BETWEEN_HANDS", currentHand: null });
+    const previewProjection = { ...projection, version: projection.version + 1 };
+    const onCommand = vi.fn(async (command: M11Command): Promise<CommandResult | null> => {
+      if (command.type !== "PREPARE_END_SESSION") return null;
+      return {
+        status: "APPLIED",
+        commandId: "prepare-end",
+        version: previewProjection.version,
+        data: {
+          kind: "SESSION_END_PREVIEW",
+          preview: {
+            sessionId: "session-1",
+            completedHandCount: 3,
+            participantPlayerIds: ["alice", "bob"],
+            finalChipBalances: { alice: 94, bob: 72 },
+          },
+        },
+        projection: previewProjection,
+      };
+    });
+
+    render(
+      <TableShell
+        projection={projection}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        notice={null}
+        onCommand={onCommand}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "开始下一手", exact: true })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "房主管理 打开", exact: true }));
+    expect(screen.getByLabelText("小盲")).toHaveValue(1);
+    expect(screen.getByLabelText("大盲")).toHaveValue(2);
+    expect(screen.getByRole("button", { name: "准备结束本场", exact: true })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "准备结束本场", exact: true }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "结束本场确认" })).toBeInTheDocument());
+    expect(screen.getByText("已完成 3 手")).toBeInTheDocument();
+    expect(screen.getByText("Alice：94")).toBeInTheDocument();
+    expect(onCommand).toHaveBeenCalledWith({ type: "PREPARE_END_SESSION" });
   });
 });

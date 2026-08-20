@@ -2,6 +2,7 @@ import { io as createSocketClient } from "socket.io-client";
 import type { Socket as ClientSocket } from "socket.io-client";
 
 import type { PlayerId } from "@friend-poker/poker-engine";
+import type { CommandResult } from "@friend-poker/shared";
 import {
   createPokerServer,
   TransportEvent,
@@ -9,7 +10,6 @@ import {
 import type {
   ClientCommandInput,
   ClientToServerEvents,
-  CommandExecutionResult,
   EntryPosition,
   IdentityResponse,
   LifecycleScheduler,
@@ -205,7 +205,7 @@ export async function createConnectedClient(
 export function executeSocketCommand(
   socket: TestSocket,
   input: unknown,
-): Promise<CommandExecutionResult> {
+): Promise<CommandResult> {
   return new Promise((resolve) => {
     socket.emit(
       TransportEvent.TableCommand,

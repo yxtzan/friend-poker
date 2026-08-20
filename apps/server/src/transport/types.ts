@@ -3,11 +3,11 @@ import type {
   EntryPosition as SharedEntryPosition,
   IdentityResponse as SharedIdentityResponse,
   M11ClientCommandInput as SharedM11ClientCommandInput,
+  M11ClientToServerEvents as SharedM11ClientToServerEvents,
   ServerToClientEvents as SharedServerToClientEvents,
   TransportErrorResponse as SharedTransportErrorResponse,
 } from "@friend-poker/shared";
 export { TransportEvent } from "@friend-poker/shared";
-import type { CommandExecutionResult } from "../runtime/types.js";
 
 /** The only command envelope exposed by the browser-facing Socket.IO contract. */
 export type ClientCommandInput = SharedM11ClientCommandInput;
@@ -18,12 +18,7 @@ export type TransportErrorResponse = SharedTransportErrorResponse;
 
 export type ServerToClientEvents = SharedServerToClientEvents;
 
-export interface ClientToServerEvents {
-  TABLE_COMMAND: (
-    input: ClientCommandInput,
-    acknowledge: (result: CommandExecutionResult) => void,
-  ) => void;
-}
+export type ClientToServerEvents = SharedM11ClientToServerEvents;
 
 export type InterServerEvents = Record<never, never>;
 
