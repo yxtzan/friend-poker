@@ -25,6 +25,10 @@ export function App() {
       reactionEggVisible={app.reactionEggVisible}
       onReactionEggClose={app.closeReactionEgg}
       onReaction={app.sendReaction}
+      streetReveal={app.streetReveal}
+      onStreetRevealComplete={app.clearStreetReveal}
+      handResult={app.handResult}
+      onHandResultClose={app.closeHandResult}
       soundEnabled={app.soundEnabled}
       onSoundEnabledChange={app.setSoundEnabled}
     />

@@ -9,17 +9,21 @@ import {
   type CommandResult,
   type M11Command,
   type PublicSessionEndPreview,
+  type PublicTableHandRecord,
   type SafeTableProjection,
   type TableSeat,
 } from "@friend-poker/shared";
 import { PlayingCard } from "./card.js";
+import { HandResultPanel } from "./hand-result.js";
 import { Seat } from "./seat.js";
+import { StreetReveal } from "./street-reveal.js";
 import { HandRankingDrawer, HistoryDrawer } from "./secondary-drawers.js";
 import type { AppPhase, TableAppState } from "../state/use-table-app.js";
 import {
   calculatePotQuickTarget,
   type PotQuickSize,
 } from "../state/bet-sizing.js";
+import { STREET_REVEAL_DURATION_MS, type StreetRevealPresentation } from "../state/presentations.js";
 
 interface TableShellProps {
   readonly projection: SafeTableProjection;
@@ -34,12 +38,17 @@ interface TableShellProps {
   readonly reactionEggVisible?: boolean;
   readonly onReactionEggClose?: () => void;
   readonly onReaction?: (emoji: ReactionEmoji) => void;
+  readonly streetReveal?: StreetRevealPresentation | null;
+  readonly onStreetRevealComplete?: () => void;
+  readonly handResult?: PublicTableHandRecord | null;
+  readonly onHandResultClose?: () => void;
   readonly soundEnabled?: boolean;
   readonly onSoundEnabledChange?: (enabled: boolean) => void;
 }
 
 const SEATS: readonly TableSeat[] = [0, 1, 2, 3, 4, 5];
 const NOOP_CLOSE_REACTION_EGG = (): void => undefined;
+const NOOP_PRESENTATION = (): void => undefined;
 
 function tableStatusLabel(status: SafeTableProjection["status"]): string {
   const labels: Record<SafeTableProjection["status"], string> = {
@@ -127,6 +136,10 @@ export function TableShell({
   reactionEggVisible = false,
   onReactionEggClose = NOOP_CLOSE_REACTION_EGG,
   onReaction = () => undefined,
+  streetReveal = null,
+  onStreetRevealComplete = NOOP_PRESENTATION,
+  handResult = null,
+  onHandResultClose = NOOP_PRESENTATION,
   soundEnabled = false,
   onSoundEnabledChange = () => undefined,
 }: TableShellProps) {
@@ -152,6 +165,12 @@ export function TableShell({
   const floatingSpectatorReactions = reactions.filter(
     (reaction) => !projection.seats.some((player) => player?.playerId === reaction.playerId),
   );
+
+  useEffect(() => {
+    if (streetReveal === null) return;
+    const timer = window.setTimeout(onStreetRevealComplete, STREET_REVEAL_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [onStreetRevealComplete, streetReveal?.key]);
 
   useEffect(() => {
     if (!reactionEggVisible || typeof document === "undefined") return;
@@ -242,6 +261,8 @@ export function TableShell({
             )}
           </div>
 
+          {streetReveal !== null && <StreetReveal key={streetReveal.key} presentation={streetReveal} />}
+
           {SEATS.map((seat) => {
             const player = projection.seats[seat] ?? null;
             const participant = hand?.participants.find((candidate) => candidate.playerId === player?.playerId) ?? null;
@@ -279,6 +300,14 @@ export function TableShell({
         </div>
       </section>
 
+      {handResult !== null && (
+        <HandResultPanel
+          projection={projection}
+          hand={handResult}
+          onClose={onHandResultClose}
+        />
+      )}
+
       <ActionDock
         projection={projection}
         viewerId={viewerId}
@@ -313,19 +342,11 @@ export function TableShell({
         </div>
       </section>
 
-      <section className="session-actions" aria-label="本场流程">
-        {viewerIsHost && projection.status === TableLifecycleStatus.NoSession && (
-          <button className="primary-button session-primary-action" type="button" disabled={actionBlocked} onClick={() => onCommand({ type: M11CommandType.StartSession })}>{pendingCommand === "START_SESSION" ? "开场中…" : "开始本场"}</button>
-        )}
-        {viewerIsHost && projection.status === TableLifecycleStatus.WaitingForFirstHand && (
-          <button className="primary-button session-primary-action" type="button" disabled={actionBlocked} onClick={() => onCommand({ type: M11CommandType.StartFirstHand })}>{pendingCommand === "START_FIRST_HAND" ? "发牌中…" : "开始第一手"}</button>
-        )}
-        {viewerIsHost && projection.status === TableLifecycleStatus.BetweenHands && (
-          <button className="primary-button session-primary-action" type="button" disabled={actionBlocked} onClick={() => onCommand({ type: M11CommandType.StartNextHand })}>{pendingCommand === "START_NEXT_HAND" ? "发牌中…" : "开始下一手"}</button>
-        )}
-        {!viewerIsHost && projection.status !== TableLifecycleStatus.HandInProgress && projection.session !== null && <span className="muted-copy">等待房主决定下一步</span>}
-        {hand !== null && hand.status === HandLifecycleStatus.Complete && <span className="muted-copy">本手结算完成</span>}
-      </section>
+      {hand !== null && hand.status === HandLifecycleStatus.Complete && (
+        <section className="session-actions" aria-label="本手状态">
+          <span className="muted-copy">本手结算完成</span>
+        </section>
+      )}
 
       {reactionEggVisible && (
         <div className="reaction-egg-backdrop">
@@ -408,6 +429,16 @@ function ActionDock({
   const legal = projection.viewerLegalActions;
   const hand = projection.currentHand;
   const isTurn = legal !== null && legal.playerId === viewerId;
+  const isHost = projection.hostPlayerId === viewerId;
+  const progression = hand === null
+    ? projection.status === TableLifecycleStatus.NoSession
+      ? { hostLabel: "开始本场", waitingLabel: "等待房主开始本场", command: M11CommandType.StartSession }
+      : projection.status === TableLifecycleStatus.WaitingForFirstHand
+        ? { hostLabel: "开始第一手", waitingLabel: "等待房主开始第一手", command: M11CommandType.StartFirstHand }
+        : projection.status === TableLifecycleStatus.BetweenHands
+          ? { hostLabel: "开始下一手", waitingLabel: "等待房主开始下一手", command: M11CommandType.StartNextHand }
+          : null
+    : null;
   const amountMode = legal?.canBet ? "BET" : legal?.canRaise ? "RAISE" : null;
   const [amount, setAmount] = useState("");
 
@@ -425,6 +456,35 @@ function ActionDock({
   }, [amountMode, hand, legal]);
 
   if (!isTurn || legal === null) {
+    if (progression !== null) {
+      return (
+        <section className="action-dock action-dock-waiting" aria-label="行动区">
+          <span className="action-dock-label">本场流程</span>
+          {isHost ? (
+            <>
+              <button
+                type="button"
+                className="primary-button session-primary-action"
+                disabled={disabled}
+                onClick={() => onCommand({ type: progression.command })}
+              >
+                {pendingCommand === progression.command ? `${progression.hostLabel}中…` : progression.hostLabel}
+              </button>
+              {projection.viewerCanRevealUncontested && (
+                <button type="button" className="secondary-button" disabled={disabled} onClick={() => onCommand({ type: M11CommandType.RevealUncontested })}>亮牌</button>
+              )}
+            </>
+          ) : projection.viewerCanRevealUncontested ? (
+            <>
+              <button type="button" className="secondary-button" disabled={disabled} onClick={() => onCommand({ type: M11CommandType.RevealUncontested })}>亮牌</button>
+              <span className="action-dock-status">{progression.waitingLabel}</span>
+            </>
+          ) : (
+            <span className="action-dock-status">{progression.waitingLabel}</span>
+          )}
+        </section>
+      );
+    }
     if (projection.viewerCanRevealUncontested) {
       return (
         <section className="action-dock action-dock-waiting" aria-label="行动区">
@@ -435,12 +495,12 @@ function ActionDock({
       );
     }
     return (
-      <section className="action-dock action-dock-waiting" aria-label="行动区">
-        <span className="action-dock-label">行动</span>
-        <span className="action-dock-status">
-          {hand?.currentActorId === null ? "等待牌局推进" : hand?.currentActorId === undefined ? "等待房主开牌" : `等待 ${displayNameForId(projection, hand.currentActorId)} 行动`}
-        </span>
-      </section>
+        <section className="action-dock action-dock-waiting" aria-label="行动区">
+          <span className="action-dock-label">行动</span>
+          <span className="action-dock-status">
+            {hand === null || hand.currentActorId === null ? "等待牌局推进" : `等待 ${displayNameForId(projection, hand.currentActorId)} 行动`}
+          </span>
+        </section>
     );
   }
 

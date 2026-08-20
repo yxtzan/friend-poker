@@ -3,6 +3,7 @@ import type {
   CommandResult,
   IdentityResponse,
   M11Command,
+  PublicTableHandRecord,
   ReactionEmoji,
   SafeTableProjection,
   TableReactionEvent,
@@ -27,6 +28,12 @@ import { acceptProjection, commandErrorMessage, identityErrorMessage } from "./p
 import { TransportEvent } from "@friend-poker/shared";
 import { ReactionRateLimiter } from "./reactions.js";
 import { TableSoundPlayer } from "./sound.js";
+import {
+  detectNewlyCompletedHand,
+  detectStreetReveal,
+  handRecordKey,
+  type StreetRevealPresentation,
+} from "./presentations.js";
 
 export type AppPhase =
   | "BOOTING"
@@ -58,6 +65,10 @@ export interface TableAppState {
   readonly reactions: readonly TableReactionEvent[];
   readonly reactionEggVisible: boolean;
   readonly closeReactionEgg: () => void;
+  readonly streetReveal: StreetRevealPresentation | null;
+  readonly clearStreetReveal: () => void;
+  readonly handResult: PublicTableHandRecord | null;
+  readonly closeHandResult: () => void;
   readonly soundEnabled: boolean;
   readonly notice: string | null;
   readonly setNickname: (nickname: string) => void;
@@ -136,6 +147,8 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
   const [uncertainCommand, setUncertainCommand] = useState<TableAppState["uncertainCommand"]>(null);
   const [reactions, setReactions] = useState<readonly TableReactionEvent[]>([]);
   const [reactionEggVisible, setReactionEggVisible] = useState(false);
+  const [streetReveal, setStreetReveal] = useState<StreetRevealPresentation | null>(null);
+  const [handResult, setHandResult] = useState<PublicTableHandRecord | null>(null);
   const [soundEnabled, setSoundEnabledState] = useState(savedSoundEnabled);
   const [notice, setNotice] = useState<string | null>(null);
   const projectionRef = useRef<SafeTableProjection | null>(null);
@@ -149,6 +162,9 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
   const commandAckTimeoutRef = useRef(options.commandAckTimeoutMs);
   const identityRef = useRef<IdentityResponse | null>(null);
   const projectionForSoundRef = useRef<SafeTableProjection | null>(null);
+  const handResultRef = useRef<PublicTableHandRecord | null>(null);
+  const dismissedHandResultKeyRef = useRef<string | null>(null);
+  const skipNextPresentationProjectionRef = useRef(true);
   const soundEnabledRef = useRef(soundEnabled);
   const reactionLimiterRef = useRef(new ReactionRateLimiter());
   const reactionTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -182,11 +198,63 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
   const acceptAuthoritativeProjection = useCallback((next: SafeTableProjection): void => {
     commandClientRef.current?.observeProjection(next);
     setUncertainCommand(uncertainCommandState(commandClientRef.current));
-    setProjection((previous) => {
-      const accepted = acceptProjection(previous, next);
-      projectionRef.current = accepted;
-      return accepted;
-    });
+    const previous = projectionRef.current;
+    const accepted = acceptProjection(previous, next);
+    if (accepted === previous) return;
+
+    projectionRef.current = accepted;
+    const skipPresentation = skipNextPresentationProjectionRef.current;
+    skipNextPresentationProjectionRef.current = false;
+    const newHandStarted =
+      accepted.currentHand !== null && previous?.currentHand?.handId !== accepted.currentHand.handId;
+
+    if (newHandStarted) {
+      handResultRef.current = null;
+      dismissedHandResultKeyRef.current = null;
+      setHandResult(null);
+      setStreetReveal(null);
+    } else {
+      const openHandResult = handResultRef.current;
+      if (openHandResult !== null) {
+        const openHandKey = handRecordKey(openHandResult);
+        const activeSession = accepted.session;
+        const resultSessionIsStale =
+          activeSession === null ||
+          activeSession.sessionId !== openHandResult.sessionId ||
+          activeSession.completedHandCount > openHandResult.handNumber;
+        if (resultSessionIsStale) {
+          handResultRef.current = null;
+          setHandResult(null);
+        } else {
+          const refreshedHandResult = accepted.recentHands.find(
+            (candidate) => handRecordKey(candidate) === openHandKey,
+          );
+          if (
+            refreshedHandResult !== undefined &&
+            dismissedHandResultKeyRef.current !== openHandKey
+          ) {
+            handResultRef.current = refreshedHandResult;
+            setHandResult(refreshedHandResult);
+          }
+        }
+      }
+
+      if (!skipPresentation && previous !== null) {
+        const reveal = detectStreetReveal(previous, accepted);
+        if (reveal !== null) setStreetReveal(reveal);
+
+        const completedHand = detectNewlyCompletedHand(previous, accepted);
+        if (
+          completedHand !== null &&
+          handRecordKey(completedHand) !== dismissedHandResultKeyRef.current
+        ) {
+          handResultRef.current = completedHand;
+          setHandResult(completedHand);
+        }
+      }
+    }
+
+    setProjection(accepted);
   }, []);
 
   useEffect(() => {
@@ -224,6 +292,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
       socketRef.current = socket;
       identityRef.current = nextIdentity;
       projectionForSoundRef.current = null;
+      skipNextPresentationProjectionRef.current = true;
       commandClientRef.current = new TableCommandClient(socket, {
         getProjection: () => projectionRef.current,
         acceptProjection: acceptAuthoritativeProjection,
@@ -247,6 +316,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
         reactionTimersRef.current.set(reaction.reactionId, timer);
       });
       socket.on("connect", () => {
+        skipNextPresentationProjectionRef.current = true;
         setPhase("CONNECTED");
         setNotice(null);
       });
@@ -268,10 +338,14 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
         explicitLeaveRef.current = true;
         socket.disconnect();
         identityRef.current = null;
+        handResultRef.current = null;
+        dismissedHandResultKeyRef.current = null;
         setProjection(null);
         setIdentity(null);
         setUncertainCommand(null);
         setReactions([]);
+        setStreetReveal(null);
+        setHandResult(null);
         setPhase(event.reason === "SESSION_ENDED" ? "SESSION_ENDED" : "REVOKED");
         setNotice(
           event.reason === "SESSION_ENDED"
@@ -304,6 +378,17 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
 
   const closeReactionEgg = useCallback((): void => {
     setReactionEggVisible(false);
+  }, []);
+
+  const clearStreetReveal = useCallback((): void => {
+    setStreetReveal(null);
+  }, []);
+
+  const closeHandResult = useCallback((): void => {
+    const current = handResultRef.current;
+    if (current !== null) dismissedHandResultKeyRef.current = handRecordKey(current);
+    handResultRef.current = null;
+    setHandResult(null);
   }, []);
 
   useEffect(() => () => {
@@ -470,6 +555,10 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     reactions,
     reactionEggVisible,
     closeReactionEgg,
+    streetReveal,
+    clearStreetReveal,
+    handResult,
+    closeHandResult,
     soundEnabled,
     notice,
     setNickname: (nextNickname) => {

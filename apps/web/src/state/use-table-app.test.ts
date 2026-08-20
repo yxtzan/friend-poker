@@ -4,6 +4,7 @@ import type {
   CommandResult,
   IdentityResponse,
   M10ClientCommandInput,
+  PublicTableHandRecord,
 } from "@friend-poker/shared";
 import { TransportEvent } from "@friend-poker/shared";
 import type { TableSocket } from "../api/socket.js";
@@ -67,6 +68,49 @@ class FakeSocket {
 
 const identity: IdentityResponse = { status: "RESTORED", playerId: "alice", nickname: "Alice" };
 
+function completedHandFixture(): PublicTableHandRecord {
+  return {
+    sessionId: "session-1",
+    handNumber: 8,
+    record: {
+      handId: "hand-8",
+      participants: [
+        { playerId: "alice", nickname: "Alice", seat: 0, startingStack: 100 },
+        { playerId: "bob", nickname: "Bob", seat: 2, startingStack: 100 },
+      ],
+      buttonSeat: 0,
+      smallBlindSeat: 0,
+      bigBlindSeat: 2,
+      smallBlind: 1,
+      bigBlind: 2,
+      actions: [],
+      board: [],
+      flop: [],
+      turn: null,
+      river: null,
+      events: [],
+      completionReason: "UNCONTESTED",
+      settlement: {
+        refunds: [
+          { playerId: "alice", amount: 0 },
+          { playerId: "bob", amount: 0 },
+        ],
+        pots: [],
+        evaluatedHands: [],
+        totalPayouts: [{ playerId: "alice", amount: 4 }],
+        finalStacks: [],
+        totalContribution: 4,
+        totalRefund: 0,
+        totalPotAmount: 4,
+        totalPotPayout: 4,
+        totalStartingStacks: 200,
+        totalFinalStacks: 200,
+      },
+      revealedHoleCards: [],
+    },
+  };
+}
+
 describe("useTableApp", () => {
   it("shows identity-required state when no valid recovery credential exists", async () => {
     const restoreIdentity = vi.fn(async () => null);
@@ -97,6 +141,205 @@ describe("useTableApp", () => {
 
     await waitFor(() => expect(result.current.phase).toBe("SESSION_ENDED"));
     expect(result.current.identity).toBeNull();
+  });
+
+  it("animates one accepted street advance, then suppresses reconnect and same-hand replays", async () => {
+    const socket = new FakeSocket();
+    const { result, unmount } = renderHook(() =>
+      useTableApp({
+        restoreIdentity: async () => identity,
+        createSocket: () => socket as unknown as TableSocket,
+      }),
+    );
+    const base = projectionFixture();
+    const preflop = {
+      ...base,
+      version: 40,
+      currentHand: { ...base.currentHand!, street: "PREFLOP" as const, board: [] },
+    };
+    const flop = {
+      ...base,
+      version: 41,
+      currentHand: { ...base.currentHand!, street: "FLOP" as const, board: [...base.currentHand!.board] },
+    };
+    const turn = {
+      ...base,
+      version: 43,
+      currentHand: { ...base.currentHand!, street: "TURN" as const, board: [...flop.currentHand.board, { rank: 4, suit: "s" as const }] },
+    };
+
+    try {
+      await waitFor(() => expect(result.current.phase).toBe("CONNECTING"));
+      act(() => {
+        socket.trigger("connect");
+        socket.trigger(TransportEvent.TableState, preflop);
+      });
+      expect(result.current.streetReveal).toBeNull();
+
+      act(() => socket.trigger(TransportEvent.TableState, flop));
+      await waitFor(() => expect(result.current.streetReveal?.street).toBe("FLOP"));
+      act(() => result.current.clearStreetReveal());
+      act(() => socket.trigger(TransportEvent.TableState, { ...flop, version: 42 }));
+      expect(result.current.streetReveal).toBeNull();
+
+      act(() => {
+        socket.trigger("disconnect");
+        socket.trigger("connect");
+        socket.trigger(TransportEvent.TableState, turn);
+      });
+      await waitFor(() => expect(result.current.projection).toBe(turn));
+      expect(result.current.streetReveal).toBeNull();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("opens a completed-hand result once, keeps it through unrelated updates, and closes it explicitly", async () => {
+    const socket = new FakeSocket();
+    const { result, unmount } = renderHook(() =>
+      useTableApp({
+        restoreIdentity: async () => identity,
+        createSocket: () => socket as unknown as TableSocket,
+      }),
+    );
+    const initial = projectionFixture({ version: 50 });
+    const completed = completedHandFixture();
+    const settled = projectionFixture({ version: 51, recentHands: [completed] });
+    try {
+      await waitFor(() => expect(result.current.phase).toBe("CONNECTING"));
+      act(() => {
+        socket.trigger("connect");
+        socket.trigger(TransportEvent.TableState, initial);
+        socket.trigger(TransportEvent.TableState, settled);
+      });
+      await waitFor(() => expect(result.current.handResult).toBe(completed));
+
+      act(() => socket.trigger(TransportEvent.TableState, { ...settled, version: 52 }));
+      expect(result.current.handResult).toBe(completed);
+      act(() => result.current.closeHandResult());
+      expect(result.current.handResult).toBeNull();
+
+      act(() => socket.trigger(TransportEvent.TableState, { ...settled, version: 53 }));
+      expect(result.current.handResult).toBeNull();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("refreshes an open result from the same safe hand record after voluntary reveal without reopening after close", async () => {
+    const socket = new FakeSocket();
+    const { result, unmount } = renderHook(() =>
+      useTableApp({
+        restoreIdentity: async () => identity,
+        createSocket: () => socket as unknown as TableSocket,
+      }),
+    );
+    const initial = projectionFixture({ version: 60 });
+    const completed = completedHandFixture();
+    const revealed = {
+      ...completed,
+      record: {
+        ...completed.record,
+        revealedHoleCards: [
+          {
+            playerId: "alice",
+            cards: [{ rank: 14, suit: "s" }, { rank: 13, suit: "h" }] as const,
+            reason: "VOLUNTARY_UNCONTESTED" as const,
+          },
+        ],
+      },
+    };
+    const settled = projectionFixture({ version: 61, recentHands: [completed] });
+    const revealedProjection = projectionFixture({ version: 62, recentHands: [revealed] });
+    const laterRevealUpdate = {
+      ...revealed,
+      record: {
+        ...revealed.record,
+        revealedHoleCards: [
+          ...revealed.record.revealedHoleCards,
+          {
+            playerId: "bob",
+            cards: [{ rank: 9, suit: "c" }, { rank: 8, suit: "d" }] as const,
+            reason: "VOLUNTARY_UNCONTESTED" as const,
+          },
+        ],
+      },
+    };
+    try {
+      await waitFor(() => expect(result.current.phase).toBe("CONNECTING"));
+      act(() => {
+        socket.trigger("connect");
+        socket.trigger(TransportEvent.TableState, initial);
+        socket.trigger(TransportEvent.TableState, settled);
+      });
+      await waitFor(() => expect(result.current.handResult).toBe(completed));
+
+      act(() => socket.trigger(TransportEvent.TableState, revealedProjection));
+      await waitFor(() => expect(result.current.handResult).toBe(revealed));
+      expect(result.current.handResult).toBe(revealed);
+
+      act(() => result.current.closeHandResult());
+      expect(result.current.handResult).toBeNull();
+      act(() => socket.trigger(TransportEvent.TableState, { ...revealedProjection, version: 63, recentHands: [laterRevealUpdate] }));
+      expect(result.current.handResult).toBeNull();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("clears a stale result after reconnecting past a completed hand without replaying the missed result", async () => {
+    const socket = new FakeSocket();
+    const { result, unmount } = renderHook(() =>
+      useTableApp({
+        restoreIdentity: async () => identity,
+        createSocket: () => socket as unknown as TableSocket,
+      }),
+    );
+    const fixtureSession = projectionFixture().session;
+    if (fixtureSession === null) throw new Error("projection fixture session is required");
+    const initial = projectionFixture({
+      version: 70,
+      currentHand: null,
+      session: { ...fixtureSession, completedHandCount: 7 },
+    });
+    const completedEight = completedHandFixture();
+    const completedNine = {
+      ...completedEight,
+      handNumber: 9,
+      record: { ...completedEight.record, handId: "hand-9" },
+    };
+    const settledEight = projectionFixture({
+      version: 71,
+      currentHand: null,
+      session: { ...initial.session!, completedHandCount: 8 },
+      recentHands: [completedEight],
+    });
+    const missedWhileDisconnected = projectionFixture({
+      version: 73,
+      currentHand: null,
+      session: { ...initial.session!, completedHandCount: 9 },
+      recentHands: [completedEight, completedNine],
+    });
+
+    try {
+      await waitFor(() => expect(result.current.phase).toBe("CONNECTING"));
+      act(() => {
+        socket.trigger("connect");
+        socket.trigger(TransportEvent.TableState, initial);
+        socket.trigger(TransportEvent.TableState, settledEight);
+      });
+      await waitFor(() => expect(result.current.handResult).toBe(completedEight));
+
+      act(() => {
+        socket.trigger("disconnect");
+        socket.trigger("connect");
+        socket.trigger(TransportEvent.TableState, missedWhileDisconnected);
+      });
+      await waitFor(() => expect(result.current.projection).toBe(missedWhileDisconnected));
+      expect(result.current.handResult).toBeNull();
+    } finally {
+      unmount();
+    }
   });
 
   it("submits presence commands with the current version and adopts stale state", async () => {
