@@ -261,7 +261,7 @@ export function TableShell({
             )}
           </div>
 
-          {streetReveal !== null && <StreetReveal presentation={streetReveal} />}
+          {streetReveal !== null && <StreetReveal key={streetReveal.key} presentation={streetReveal} />}
 
           {SEATS.map((seat) => {
             const player = projection.seats[seat] ?? null;

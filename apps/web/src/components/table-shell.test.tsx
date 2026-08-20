@@ -35,7 +35,10 @@ function resultFixture(): PublicTableHandRecord {
       events: [],
       completionReason: "SHOWDOWN",
       settlement: {
-        refunds: [],
+        refunds: [
+          { playerId: "alice", amount: 0 },
+          { playerId: "bob", amount: 0 },
+        ],
         pots: [
           {
             potIndex: 0,
@@ -558,6 +561,63 @@ describe("TableShell", () => {
     }
   });
 
+  it("remounts each street reveal when staged runout updates arrive before 820ms", () => {
+    const baseProps = {
+      projection: projectionFixture(),
+      viewerId: "alice",
+      phase: "CONNECTED" as const,
+      pendingCommand: null,
+      notice: null,
+      onCommand: vi.fn(),
+    };
+    const view = render(
+      <TableShell
+        {...baseProps}
+        streetReveal={{
+          key: "hand-1:FLOP:2c,7d,Jh",
+          handId: "hand-1",
+          street: "FLOP",
+          cards: [
+            { rank: 2, suit: "c" },
+            { rank: 7, suit: "d" },
+            { rank: 11, suit: "h" },
+          ],
+        }}
+      />,
+    );
+    const flop = screen.getByTestId("street-reveal");
+
+    view.rerender(
+      <TableShell
+        {...baseProps}
+        streetReveal={{
+          key: "hand-1:TURN:4s",
+          handId: "hand-1",
+          street: "TURN",
+          cards: [{ rank: 4, suit: "s" }],
+        }}
+      />,
+    );
+    const turn = screen.getByTestId("street-reveal");
+    expect(turn).not.toBe(flop);
+    expect(within(turn).getByLabelText("4♠")).toBeInTheDocument();
+
+    view.rerender(
+      <TableShell
+        {...baseProps}
+        streetReveal={{
+          key: "hand-1:RIVER:Ac",
+          handId: "hand-1",
+          street: "RIVER",
+          cards: [{ rank: 14, suit: "c" }],
+        }}
+      />,
+    );
+    const river = screen.getByTestId("street-reveal");
+    expect(river).not.toBe(turn);
+    expect(within(river).getByLabelText("A♣")).toBeInTheDocument();
+  });
+
   it("keeps the authoritative multi-pot result visible and exposes only revealed cards", () => {
     const onClose = vi.fn();
     render(
@@ -597,7 +657,10 @@ describe("TableShell", () => {
         ...result.record,
         settlement: {
           ...settlement,
-          refunds: [{ playerId: "bob", amount: 50 }],
+          refunds: [
+            { playerId: "bob", amount: 50 },
+            { playerId: "alice", amount: 0 },
+          ],
         },
       },
     };
@@ -617,6 +680,8 @@ describe("TableShell", () => {
     const refunds = screen.getByLabelText("未跟注筹码退回");
     expect(within(refunds).getByText("Bob")).toBeInTheDocument();
     expect(within(refunds).getByText("+50")).toBeInTheDocument();
+    expect(within(refunds).queryByText("+0")).not.toBeInTheDocument();
+    expect(within(refunds).getAllByRole("listitem")).toHaveLength(1);
     expect(screen.getByText("Alice +25")).toBeInTheDocument();
     expect(screen.getByText("Bob +15")).toBeInTheDocument();
   });

@@ -89,6 +89,15 @@ describe("presentation transition detection", () => {
     expect(detectStreetReveal(turnProjection, riverProjection)).toMatchObject({ street: "RIVER", cards: [river] });
   });
 
+  it("reveals a river committed with the completed safe record when currentHand clears", () => {
+    const turnProjection = projectionWithBoard(8, [...flop, turn], "hand-8");
+    const completed = {
+      ...projectionFixture({ version: 9, currentHand: null }),
+      recentHands: [settledHand()],
+    };
+    expect(detectStreetReveal(turnProjection, completed)).toMatchObject({ street: "RIVER", cards: [river] });
+  });
+
   it("ignores initial, stale, replayed, invalid, and unrelated hand projections", () => {
     const preflop = projectionWithBoard(5, []);
     const flopProjection = projectionWithBoard(6, [...flop]);

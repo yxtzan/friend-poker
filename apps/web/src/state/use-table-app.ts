@@ -217,15 +217,25 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
       const openHandResult = handResultRef.current;
       if (openHandResult !== null) {
         const openHandKey = handRecordKey(openHandResult);
-        const refreshedHandResult = accepted.recentHands.find(
-          (candidate) => handRecordKey(candidate) === openHandKey,
-        );
-        if (
-          refreshedHandResult !== undefined &&
-          dismissedHandResultKeyRef.current !== openHandKey
-        ) {
-          handResultRef.current = refreshedHandResult;
-          setHandResult(refreshedHandResult);
+        const activeSession = accepted.session;
+        const resultSessionIsStale =
+          activeSession === null ||
+          activeSession.sessionId !== openHandResult.sessionId ||
+          activeSession.completedHandCount > openHandResult.handNumber;
+        if (resultSessionIsStale) {
+          handResultRef.current = null;
+          setHandResult(null);
+        } else {
+          const refreshedHandResult = accepted.recentHands.find(
+            (candidate) => handRecordKey(candidate) === openHandKey,
+          );
+          if (
+            refreshedHandResult !== undefined &&
+            dismissedHandResultKeyRef.current !== openHandKey
+          ) {
+            handResultRef.current = refreshedHandResult;
+            setHandResult(refreshedHandResult);
+          }
         }
       }
 

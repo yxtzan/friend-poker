@@ -37,12 +37,23 @@ export function detectStreetReveal(
   if (previous === null || next.version <= previous.version) return null;
   const previousHand = previous.currentHand;
   const nextHand = next.currentHand;
-  if (previousHand === null || nextHand === null || previousHand.handId !== nextHand.handId) {
+  if (previousHand === null) {
     return null;
   }
 
+  const completedRecord = next.recentHands.find(
+    (candidate) => candidate.record.handId === previousHand.handId,
+  );
+  const nextBoard =
+    nextHand !== null && nextHand.handId === previousHand.handId
+      ? nextHand.board
+      : completedRecord?.record.handId === previousHand.handId
+        ? completedRecord.record.board
+        : null;
+  if (nextBoard === null) return null;
+
   const previousCount = previousHand.board.length;
-  const nextCount = nextHand.board.length;
+  const nextCount = nextBoard.length;
   const isStreetAdvance =
     (previousCount === 0 && nextCount === 3) ||
     (previousCount === 3 && nextCount === 4) ||
@@ -51,11 +62,12 @@ export function detectStreetReveal(
 
   const street = streetForBoardSize(nextCount);
   if (street === null) return null;
-  const cards = nextHand.board.slice(previousCount);
+  const cards = nextBoard.slice(previousCount);
   if (cards.length === 0) return null;
+  const handId = previousHand.handId;
   return {
-    key: `${nextHand.handId}:${street}:${cards.map(cardKey).join(",")}`,
-    handId: nextHand.handId,
+    key: `${handId}:${street}:${cards.map(cardKey).join(",")}`,
+    handId,
     street,
     cards,
   };

@@ -91,6 +91,7 @@ export function HandResultPanel({
   if (settlement === null) return null;
   const reasonLabel = record.completionReason === "SHOWDOWN" ? "摊牌结算" : "无人跟注结算";
   const positivePayouts = winningPayouts(settlement.totalPayouts);
+  const positiveRefunds = settlement.refunds.filter((refund) => refund.amount > 0);
 
   return (
     <section className="hand-result" aria-labelledby="hand-result-title" data-testid="hand-result">
@@ -129,11 +130,11 @@ export function HandResultPanel({
         ))}
       </div>
 
-      {settlement.refunds.length > 0 && (
+      {positiveRefunds.length > 0 && (
         <div className="hand-result-refunds" aria-label="未跟注筹码退回">
           <h3>未跟注筹码退回</h3>
           <ul>
-            {settlement.refunds.map((refund) => (
+            {positiveRefunds.map((refund) => (
               <li key={refund.playerId}>
                 <span>{playerName(projection, record, refund.playerId)}</span>
                 <strong>+{formatChips(refund.amount)}</strong>

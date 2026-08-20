@@ -91,7 +91,10 @@ function completedHandFixture(): PublicTableHandRecord {
       events: [],
       completionReason: "UNCONTESTED",
       settlement: {
-        refunds: [],
+        refunds: [
+          { playerId: "alice", amount: 0 },
+          { playerId: "bob", amount: 0 },
+        ],
         pots: [],
         evaluatedHands: [],
         totalPayouts: [{ playerId: "alice", amount: 4 }],
@@ -278,6 +281,61 @@ describe("useTableApp", () => {
       act(() => result.current.closeHandResult());
       expect(result.current.handResult).toBeNull();
       act(() => socket.trigger(TransportEvent.TableState, { ...revealedProjection, version: 63, recentHands: [laterRevealUpdate] }));
+      expect(result.current.handResult).toBeNull();
+    } finally {
+      unmount();
+    }
+  });
+
+  it("clears a stale result after reconnecting past a completed hand without replaying the missed result", async () => {
+    const socket = new FakeSocket();
+    const { result, unmount } = renderHook(() =>
+      useTableApp({
+        restoreIdentity: async () => identity,
+        createSocket: () => socket as unknown as TableSocket,
+      }),
+    );
+    const fixtureSession = projectionFixture().session;
+    if (fixtureSession === null) throw new Error("projection fixture session is required");
+    const initial = projectionFixture({
+      version: 70,
+      currentHand: null,
+      session: { ...fixtureSession, completedHandCount: 7 },
+    });
+    const completedEight = completedHandFixture();
+    const completedNine = {
+      ...completedEight,
+      handNumber: 9,
+      record: { ...completedEight.record, handId: "hand-9" },
+    };
+    const settledEight = projectionFixture({
+      version: 71,
+      currentHand: null,
+      session: { ...initial.session!, completedHandCount: 8 },
+      recentHands: [completedEight],
+    });
+    const missedWhileDisconnected = projectionFixture({
+      version: 73,
+      currentHand: null,
+      session: { ...initial.session!, completedHandCount: 9 },
+      recentHands: [completedEight, completedNine],
+    });
+
+    try {
+      await waitFor(() => expect(result.current.phase).toBe("CONNECTING"));
+      act(() => {
+        socket.trigger("connect");
+        socket.trigger(TransportEvent.TableState, initial);
+        socket.trigger(TransportEvent.TableState, settledEight);
+      });
+      await waitFor(() => expect(result.current.handResult).toBe(completedEight));
+
+      act(() => {
+        socket.trigger("disconnect");
+        socket.trigger("connect");
+        socket.trigger(TransportEvent.TableState, missedWhileDisconnected);
+      });
+      await waitFor(() => expect(result.current.projection).toBe(missedWhileDisconnected));
       expect(result.current.handResult).toBeNull();
     } finally {
       unmount();

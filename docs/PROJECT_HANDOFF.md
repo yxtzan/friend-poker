@@ -354,9 +354,9 @@ not technical debt to “fix” casually by persisting decks or private hole car
 Verified on the M13 implementation snapshot based on branch
 `feature/street-reveal-hand-result` and baseline `main@b9a216a`:
 
-- standard suite: **408 tests** total;
+- standard suite: **411 tests** total;
 - `apps/server`: **110 tests** across 13 test files;
-- `apps/web`: **49 tests** across 11 test files;
+- `apps/web`: **52 tests** across 11 test files;
 - `packages/poker-engine`: **249 tests** across 28 test files;
 - exhaustive evaluator suite: **1 additional exhaustive test**;
 - CI migration smoke step, `npm run db:migrate:deploy --workspace @friend-poker/server`, remains
