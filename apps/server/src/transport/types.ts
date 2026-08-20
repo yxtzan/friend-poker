@@ -2,6 +2,7 @@ import type { PlayerId } from "@friend-poker/poker-engine";
 import type {
   EntryPosition as SharedEntryPosition,
   IdentityResponse as SharedIdentityResponse,
+  M11Command as BrowserCommand,
   ServerToClientEvents as SharedServerToClientEvents,
   TransportErrorResponse as SharedTransportErrorResponse,
 } from "@friend-poker/shared";
@@ -22,10 +23,16 @@ export type ClientRuntimeCommand = Exclude<
   }
 >;
 
+/**
+ * The browser uses BrowserCommand. ClientRuntimeCommand remains available to
+ * the in-process transport tests; the public web client never imports it.
+ */
+export type ClientCommand = ClientRuntimeCommand | BrowserCommand;
+
 export interface ClientCommandInput {
   readonly commandId: string;
   readonly expectedVersion: number;
-  readonly command: ClientRuntimeCommand;
+  readonly command: ClientCommand;
 }
 
 export type EntryPosition = SharedEntryPosition;

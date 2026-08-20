@@ -238,7 +238,48 @@ export function nextCommand(
   commandId: string,
   command: ClientCommandInput["command"],
 ): ClientCommandInput {
-  return Object.freeze({ commandId, expectedVersion: projection.version, command });
+  const raw = command as unknown as Record<string, unknown>;
+  let browserCommand: ClientCommandInput["command"] = command;
+  switch (raw.type) {
+    case "START_SESSION":
+      browserCommand = { type: "START_SESSION" };
+      break;
+    case "START_FIRST_HAND":
+      browserCommand = {
+        type: "START_FIRST_HAND",
+        ...(Number.isInteger(raw.buttonSeat) ? { buttonSeat: raw.buttonSeat } : {}),
+      } as ClientCommandInput["command"];
+      break;
+    case "START_NEXT_HAND":
+      browserCommand = { type: "START_NEXT_HAND" };
+      break;
+    case "REPLENISH":
+      browserCommand = { type: "REPLENISH" };
+      break;
+    case "HOST_ADJUST_CHIPS":
+      browserCommand = {
+        type: "HOST_ADJUST_CHIPS",
+        targetPlayerId: raw.targetPlayerId as string,
+        amount: raw.amount as number,
+      };
+      break;
+    case "POKER_ACTION": {
+      const action = raw.action as Record<string, unknown>;
+      browserCommand = {
+        type: action.type as "FOLD" | "CHECK" | "CALL" | "BET" | "RAISE" | "ALL_IN",
+        ...("amount" in action ? { amount: action.amount as number } : {}),
+        ...("raiseTo" in action ? { raiseTo: action.raiseTo as number } : {}),
+      } as ClientCommandInput["command"];
+      break;
+    }
+    case "SIT":
+      browserCommand = { type: "SIT", seat: raw.seat as 0 | 1 | 2 | 3 | 4 | 5 };
+      break;
+    case "END_SESSION":
+      browserCommand = { type: "END_SESSION", confirmation: raw.confirmation as never };
+      break;
+  }
+  return Object.freeze({ commandId, expectedVersion: projection.version, command: browserCommand });
 }
 
 export function findPublicPlayer(projection: SafeTableProjection, playerId: PlayerId) {

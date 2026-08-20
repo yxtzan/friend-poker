@@ -88,6 +88,8 @@ export function projectionFixture(overrides: Partial<SafeTableProjection> = {}):
       ],
       actions: [],
     },
+    viewerLegalActions: null,
+    viewerCanRevealUncontested: false,
     ownHoleCards: [
       { rank: 14, suit: "h" },
       { rank: 14, suit: "d" },

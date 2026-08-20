@@ -94,4 +94,43 @@ describe("TableShell", () => {
     expect(onCommand).toHaveBeenCalledWith({ type: "SIT", seat: 1 });
     expect(screen.getByText("当前没有可展示的私人底牌")).toBeInTheDocument();
   });
+
+  it("renders only the viewer's projected legal actions and amount boundaries", () => {
+    render(
+      <TableShell
+        projection={projectionFixture({
+          viewerLegalActions: {
+            playerId: "alice",
+            canFold: true,
+            canCheck: false,
+            canCall: true,
+            callAmount: 4,
+            callIsAllIn: false,
+            canBet: false,
+            minimumBet: null,
+            maximumBet: null,
+            canRaise: true,
+            minimumRaiseTo: 12,
+            maximumRaiseTo: 94,
+            raiseRightsOpen: true,
+            canAllIn: true,
+            allInTo: 96,
+          },
+        })}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        uncertainCommand={null}
+        notice={null}
+        onRetryUncertain={vi.fn()}
+        onCommand={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /弃牌/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /跟注 4/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /加注 Raise/ })).toBeInTheDocument();
+    expect(screen.getByText(/最低 12 · 最高 94/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^过牌/ })).not.toBeInTheDocument();
+  });
 });

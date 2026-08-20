@@ -7,6 +7,7 @@ import type {
   BettingActionRecord,
   Card,
   DomainMetadata,
+  LegalActions,
   HandActionEvent,
   HandLifecycleStatus,
   LedgerEntryType,
@@ -232,6 +233,10 @@ export interface CurrentHandProjection {
   readonly actions: readonly HandActionEvent[];
 }
 
+export interface ViewerLegalActions extends Omit<LegalActions, "playerId"> {
+  readonly playerId: PlayerId;
+}
+
 export interface SessionProjection {
   readonly sessionId: string;
   readonly blinds: { readonly smallBlind: number; readonly bigBlind: number };
@@ -265,6 +270,8 @@ export interface SafeTableProjection {
   readonly spectators: readonly PublicPlayerProjection[];
   readonly session: SessionProjection | null;
   readonly currentHand: CurrentHandProjection | null;
+  readonly viewerLegalActions: ViewerLegalActions | null;
+  readonly viewerCanRevealUncontested: boolean;
   readonly ownHoleCards: readonly [Card, Card] | null;
   readonly recentHands: readonly TableHandRecord[];
   readonly recentSessions: readonly PublicSessionSummary[];

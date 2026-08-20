@@ -1,4 +1,4 @@
-import { TABLE_SEAT_COUNT } from "@friend-poker/poker-engine";
+import { legalActions, TABLE_SEAT_COUNT } from "@friend-poker/poker-engine";
 import type {
   Card,
   ChipLedgerEntry,
@@ -16,6 +16,7 @@ import type {
   SafeTableProjection,
   SessionProjection,
   TableViewer,
+  ViewerLegalActions,
 } from "./types.js";
 
 function deepFreeze<T>(value: T): T {
@@ -127,6 +128,39 @@ function projectOwnCards(
   return Object.freeze([copyCard(ownHand.cards[0]), copyCard(ownHand.cards[1])] as const);
 }
 
+function projectViewerLegalActions(
+  hand: OrchestratedHandState | null,
+  viewer: TableViewer,
+): ViewerLegalActions | null {
+  if (
+    hand === null ||
+    viewer.kind !== "PLAYER" ||
+    hand.bettingState.status !== "BETTING" ||
+    hand.bettingState.currentActorId !== viewer.playerId
+  ) {
+    return null;
+  }
+
+  const legal = legalActions(hand.bettingState);
+  return Object.freeze({
+    playerId: legal.playerId,
+    canFold: legal.canFold,
+    canCheck: legal.canCheck,
+    canCall: legal.canCall,
+    callAmount: legal.callAmount,
+    callIsAllIn: legal.callIsAllIn,
+    canBet: legal.canBet,
+    minimumBet: legal.minimumBet,
+    maximumBet: legal.maximumBet,
+    canRaise: legal.canRaise,
+    minimumRaiseTo: legal.minimumRaiseTo,
+    maximumRaiseTo: legal.maximumRaiseTo,
+    raiseRightsOpen: legal.raiseRightsOpen,
+    canAllIn: legal.canAllIn,
+    allInTo: legal.allInTo,
+  });
+}
+
 export function projectTableState(
   state: TableState,
   version: number,
@@ -147,6 +181,13 @@ export function projectTableState(
     spectators,
     session: projectSession(state),
     currentHand: projectCurrentHand(state.activeHand),
+    viewerLegalActions: projectViewerLegalActions(state.activeHand, viewer),
+    viewerCanRevealUncontested:
+      viewer.kind === "PLAYER" &&
+      state.uncontestedRevealOpportunity?.hand.bettingState.uncontestedWinnerId === viewer.playerId &&
+      !state.uncontestedRevealOpportunity.hand.revealedHoleCards.some(
+        (hand) => hand.playerId === viewer.playerId,
+      ),
     ownHoleCards: projectOwnCards(state.activeHand, viewer),
     recentHands: state.recentHands.map((record) => safeClone(record)),
     recentSessions: state.recentSessions.map(projectSessionSummary),

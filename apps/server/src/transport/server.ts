@@ -146,6 +146,174 @@ function hasActiveSession(projection: SafeTableProjection): boolean {
   );
 }
 
+function derivedBrowserId(
+  purpose: string,
+  playerId: PlayerId,
+  commandId: string,
+): string {
+  return `browser-${purpose}-${playerId}-${commandId}`;
+}
+
+function firstEligibleSeat(projection: SafeTableProjection): TableSeat {
+  const player = projection.seats.find(
+    (candidate): candidate is NonNullable<typeof candidate> =>
+      candidate !== null && candidate.present && candidate.online && candidate.chipBalance > 0,
+  );
+  return player?.seat ?? 0;
+}
+
+function stableFirstHandButton(projection: SafeTableProjection): TableSeat {
+  if (projection.currentHand !== null) return projection.currentHand.buttonSeat as TableSeat;
+  if (projection.session?.lastButtonSeat !== null && projection.session?.lastButtonSeat !== undefined) {
+    return projection.session.lastButtonSeat;
+  }
+  return firstEligibleSeat(projection);
+}
+
+function startSessionInitialGrants(
+  projection: SafeTableProjection,
+  playerId: PlayerId,
+  commandId: string,
+): readonly { readonly playerId: PlayerId; readonly ledgerEntryId: string }[] {
+  const sessionId = derivedBrowserId("session", playerId, commandId);
+  if (projection.session?.sessionId === sessionId) {
+    const grants = projection.session.ledger
+      .filter(
+        (entry) =>
+          entry.type === "INITIAL_GRANT" &&
+          entry.ledgerEntryId ===
+            derivedBrowserId(`initial-${entry.playerId}`, playerId, commandId),
+      )
+      .map((entry) => ({ playerId: entry.playerId, ledgerEntryId: entry.ledgerEntryId }));
+    if (grants.length > 0) return grants;
+  }
+  return projection.seats.flatMap((candidate) =>
+    candidate === null || !candidate.present || candidate.seat === null
+      ? []
+      : [{
+          playerId: candidate.playerId,
+          ledgerEntryId: derivedBrowserId(
+            `initial-${candidate.playerId}`,
+            playerId,
+            commandId,
+          ),
+        }],
+  );
+}
+
+/**
+ * Convert the browser's intent-only M11 vocabulary into the trusted runtime
+ * command shape. Authoritative identifiers are always derived here, even if a
+ * caller tries to add similarly named fields to a browser payload.
+ */
+function enrichBrowserCommand(
+  command: Record<string, unknown>,
+  projection: SafeTableProjection,
+  playerId: PlayerId,
+  commandId: string,
+): RuntimeCommand {
+  switch (command.type) {
+    case "FOLD":
+    case "CHECK":
+    case "CALL":
+    case "ALL_IN":
+      return {
+        type: RuntimeCommandType.PokerAction,
+        action: { type: command.type },
+      } as RuntimeCommand;
+    case "BET":
+      if (typeof command.amount === "number") {
+        return {
+          type: RuntimeCommandType.PokerAction,
+          action: { type: "BET", amount: command.amount },
+        } as RuntimeCommand;
+      }
+      break;
+    case "RAISE":
+      if (typeof command.raiseTo === "number") {
+        return {
+          type: RuntimeCommandType.PokerAction,
+          action: { type: "RAISE", raiseTo: command.raiseTo },
+        } as RuntimeCommand;
+      }
+      break;
+    case "SIT":
+      return { type: RuntimeCommandType.Sit, seat: command.seat as TableSeat };
+    case "STAND_TO_SPECTATE":
+      return { type: RuntimeCommandType.StandToSpectate };
+    case "LEAVE_TABLE":
+      return { type: RuntimeCommandType.LeaveTable };
+    case "REVEAL_UNCONTESTED":
+      return { type: RuntimeCommandType.RevealUncontested };
+    case "REPLENISH":
+      return {
+        type: RuntimeCommandType.Replenish,
+        ledgerEntryId: derivedBrowserId("replenish", playerId, commandId),
+      };
+    case "START_SESSION":
+      return {
+        type: RuntimeCommandType.StartSession,
+        sessionId: derivedBrowserId("session", playerId, commandId),
+        initialGrants: startSessionInitialGrants(projection, playerId, commandId),
+      };
+    case "START_FIRST_HAND":
+      return {
+        type: RuntimeCommandType.StartFirstHand,
+        handId: derivedBrowserId("first-hand", playerId, commandId),
+        buttonSeat:
+          Number.isInteger(command.buttonSeat) &&
+          (command.buttonSeat as number) >= 0 &&
+          (command.buttonSeat as number) <= 5
+            ? command.buttonSeat as TableSeat
+            : stableFirstHandButton(projection),
+      };
+    case "START_NEXT_HAND":
+      return {
+        type: RuntimeCommandType.StartNextHand,
+        handId: derivedBrowserId("next-hand", playerId, commandId),
+      };
+    case "HOST_ADJUST_CHIPS":
+      return {
+        type: RuntimeCommandType.HostAdjustChips,
+        targetPlayerId: command.targetPlayerId as PlayerId,
+        amount: command.amount as number,
+        ledgerEntryId: derivedBrowserId("host-adjustment", playerId, commandId),
+      };
+    case "CHANGE_BLINDS":
+      return {
+        type: RuntimeCommandType.ChangeBlinds,
+        smallBlind: command.smallBlind as number,
+        bigBlind: command.bigBlind as number,
+      };
+    case "TRANSFER_HOST":
+      return {
+        type: RuntimeCommandType.TransferHost,
+        targetPlayerId: command.targetPlayerId as PlayerId,
+      };
+    case "KICK":
+      return {
+        type: RuntimeCommandType.Kick,
+        targetPlayerId: command.targetPlayerId as PlayerId,
+      };
+    case "HOST_FORCE_FOLD":
+      return {
+        type: RuntimeCommandType.HostForceFold,
+        targetPlayerId: command.targetPlayerId as PlayerId,
+      };
+    case "PREPARE_END_SESSION":
+      return { type: RuntimeCommandType.PrepareEndSession };
+    case "END_SESSION":
+      return {
+        type: RuntimeCommandType.EndSession,
+        confirmation: command.confirmation as never,
+      };
+  }
+  if (command.type === RuntimeCommandType.PokerAction) {
+    return { type: "INVALID_CLIENT_COMMAND" } as unknown as RuntimeCommand;
+  }
+  return command as unknown as RuntimeCommand;
+}
+
 function authenticationError(code: string, message: string): Error {
   const error = new Error(message) as Error & { data?: { readonly code: string } };
   error.data = Object.freeze({ code });
@@ -714,7 +882,15 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
           return;
         }
 
-        let command = inputRecord.command as RuntimeCommand;
+        let command =
+          commandRecord === null
+            ? (inputRecord.command as RuntimeCommand)
+            : enrichBrowserCommand(
+                commandRecord,
+                playerProjection(playerId),
+                playerId,
+                commandId,
+              );
         if (commandRecord?.type === RuntimeCommandType.Sit) {
           const projection = playerProjection(playerId);
           const initialGrantLedgerEntryId = clientSitInitialGrantLedgerEntryId(

@@ -247,7 +247,7 @@ describe("deterministic disconnected-turn lifecycle", () => {
     const newHandVersion = serverProjection().version;
     clock.advanceBy(60_000);
     await fixture!.server.settleLifecycle();
-    expect(serverProjection().currentHand?.handId).toBe("lifecycle-hand-2");
+    expect(serverProjection().currentHand?.handId).toContain("new-hand-after-stale-timer");
     expect(serverProjection().version).toBe(newHandVersion);
   });
 
@@ -382,8 +382,12 @@ describe("deterministic host grace and paced Runout", () => {
       seat: 0,
     });
     host.socket.disconnect();
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    await fixture.server.settleLifecycle();
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      await fixture.server.settleLifecycle();
+      if (serverProjection().seats[0]?.online === false) break;
+    }
+    expect(serverProjection().seats[0]?.online).toBe(false);
     clock.advanceBy(60_000);
     await fixture.server.settleLifecycle();
     expect(serverProjection().hostPlayerId).toBeNull();
@@ -545,7 +549,7 @@ describe("deterministic host grace and paced Runout", () => {
     const version = serverProjection().version;
     clock.fireCancelledCallbacks();
     await fixture!.server.settleLifecycle();
-    expect(serverProjection().currentHand?.handId).toBe("hand-after-cancelled-runout");
+    expect(serverProjection().currentHand?.handId).toContain("hand-after-cancelled-runout");
     expect(serverProjection().version).toBe(version);
   });
 });

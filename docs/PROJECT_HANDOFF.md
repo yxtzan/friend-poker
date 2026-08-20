@@ -1,11 +1,11 @@
 # Friend Poker Project Handoff
 
-Canonical fast-recovery reference for the repository state after the Milestone 10 web
-foundation.
+Canonical fast-recovery reference for the repository state after the Milestone 11 playable
+controls implementation.
 
-- Verified main baseline before M10: `3d3685e Add canonical project handoff`
+- Verified main baseline before M11: `d02983e Rescue Milestone 10 visual foundation`
 - Last repository verification: 2026-08-20
-- Next major phase: gameplay controls, host/admin UX, then deployment and polish
+- Next major phase: M12 interaction polish, reactions/sound, and deployment readiness
 
 This file describes the current implementation snapshot, not an intermediate milestone or a
 chat transcript.
@@ -97,8 +97,9 @@ reimplement poker rules or become alternate sources of game truth.
 ### `packages/shared`
 
 Browser-safe DTOs, public projection shapes, transport event names, identity responses, and
-the M10 presence-command envelope. It contains no server runtime, persistence, credential, or
-private-hand implementation.
+the M11 intent-only command envelope. It contains no server runtime, persistence, credential,
+or private-hand implementation. `SafeTableProjection.viewerLegalActions` is a server-derived,
+current-viewer-only action summary; it is null for spectators and non-acting viewers.
 
 ### `apps/web`
 
@@ -108,12 +109,18 @@ React + TypeScript + Vite client foundation:
 - responsive six-seat oval table with public board, pot, street, hand status, host, online,
   offline, current-actor, contribution, and spectator state;
 - own-hole-card-only rendering from the per-viewer projection;
-- centralized versioned command submission for `SIT`, `STAND_TO_SPECTATE`, and `LEAVE_TABLE`;
+- centralized versioned command submission for presence, gameplay, Session, replenishment, and
+  host-control intents;
+- server-provided legal-action dock with Raise-to amount entry, Pot quick buttons, and explicit
+  same-envelope retry after an acknowledgement timeout;
+- manual Session start/first-hand/next-hand flow, replenishment, blind changes, ledger-backed
+  host chip adjustments, host transfer, kick, host force-Fold, and preview-confirmed Session end;
 - reconnect, disconnect, revocation, stale-version, duplicate, and server-error feedback.
 - `apps/web/DESIGN.md` is the canonical frontend visual-direction reference for M10.5 and later UI work.
 
-The M10 client deliberately does not calculate poker legality, reveal other players' cards, or
-implement action controls, host/admin controls, session controls, history, or deployment.
+The M11 client still does not calculate poker legality, reveal other players' cards, or send
+authoritative identifiers. The server enriches browser intents with stable IDs and the
+authenticated socket identity before invoking the runtime.
 
 ## 4. Milestone status
 
@@ -129,10 +136,11 @@ implement action controls, host/admin controls, session controls, history, or de
 | M8 | `Implement Milestone 8 connection lifecycle` | COMPLETE, merged | Disconnect/host/offline timers, Runout pacing, admin lifecycle |
 | M9 | `Implement Milestone 9 persistence recovery` | COMPLETE, merged | Prisma/SQLite checkpoints, durable identity/idempotency/recovery |
 | M10 | Web foundation | IMPLEMENTED | Browser entry/recovery shell, safe shared contracts, six-seat public table projection, and presence commands |
+| M11 | Fully playable game controls and host/session controls | IMPLEMENTED | Viewer-scoped legal actions, intent-only browser commands, playable betting UI, Session flow, replenishment, host controls, and acknowledgement-loss retry |
 
 Merged main milestones through M9 are visible in Git history from `cdf71e0` through `de44515`.
-The M10 web foundation is implemented in the current snapshot; gameplay controls and
-deployment remain future work.
+M10 and M11 are implemented in the current snapshot; history browsing, interaction polish,
+and deployment remain future work.
 
 ## 5. Critical invariants
 
@@ -164,6 +172,9 @@ deployment remain future work.
 
 - The browser sends `commandId`, `expectedVersion`, and a typed client command. It does not
   supply authoritative `actorId`.
+- Browser gameplay commands are `FOLD`, `CHECK`, `CALL`, `BET`, `RAISE`, and `ALL_IN`; Session
+  and host commands are intent-only. The server derives hand/session/ledger IDs and binds the
+  actor from the authenticated socket. Browser payloads cannot create `SYSTEM` commands.
 - The authenticated socket determines the player principal. Browser input cannot create a
   `SYSTEM` principal or send internal lifecycle commands.
 - The server state and poker engine decide action order, legality, chip amounts, pots, cards,
@@ -327,11 +338,12 @@ not technical debt to “fix” casually by persisting decks or private hole car
 
 ## 12. Current test baseline
 
-Verified on the M10 implementation snapshot based on `main@3d3685e`:
+Verified on the M11 implementation snapshot based on branch `agent/milestone-11-playable-controls`
+and baseline `main@d02983e`:
 
-- standard suite: **361 tests** total;
-- `apps/server`: **100 tests** across 9 test files;
-- `apps/web`: **12 tests** across 5 test files;
+- standard suite: **374 tests** total;
+- `apps/server`: **104 tests** across 10 test files;
+- `apps/web`: **21 tests** across 7 test files;
 - `packages/poker-engine`: **249 tests** across 28 test files;
 - exhaustive evaluator suite: **1 additional exhaustive test**;
 - CI migration smoke step, `npm run db:migrate:deploy --workspace @friend-poker/server`, remains
@@ -383,33 +395,33 @@ V1 excludes:
 - long-term analytics/rankings such as VPIP/PFR leaderboards;
 - distributed infrastructure, microservices, Redis, Kubernetes, and multi-replica operation.
 
-## 15. Known limitations after M10
+## 15. Known limitations after M11
 
-- M10 covers identity entry/recovery, presence, safe public projections, and the responsive
-  table shell; gameplay action controls are not implemented yet.
-- Host/admin/session controls, replenishment, hand history, Session summaries, and reactions
-  remain intentionally deferred.
+- M11 covers the playable betting and host/session control path, but does not add a dedicated
+  history browser or Session-summary screen; safe history remains in the projection contract
+  for a later client surface.
+- Sound, fixed emoji reactions, lightweight state-driven animation, and deployment execution
+  remain intentionally deferred to later work.
 - Railway configuration is documented but the application has not been deployed by the
-  repository work through M10.
+  repository work through M11.
 - Persistence is deliberately constrained to SQLite and one process/replica.
 - A process crash during a hand rolls back that unfinished hand to the pre-hand checkpoint.
 - Exact persistent in-hand recovery is not supported and is intentionally out of scope.
 
 Do not list already-fixed M5–M9 review defects as current limitations.
 
-## 16. Next phase: gameplay controls and product UX
+## 16. Next phase: interaction polish and deployment readiness
 
 The next implementation phase should be planned in a new approved milestone rather than
-started from this document. Expected remaining client work includes:
+started from this document. Expected remaining client/product work includes:
 
-- Fold/Check/Call/Bet/Raise/All-in controls using Raise-to semantics;
-- minimum Raise-to guidance and Pot quick buttons whose results are server-validated;
-- host controls, Session start/end, manual next-hand flow, chip adjustments, and kick/transfer;
-- replenishment, recent hand history, and Session summaries;
+- recent hand history and Session-summary presentation;
 - expanded reconnect, offline, revocation, stale-command, and error feedback across gameplay;
-- deeper responsive gameplay layouts and table-state transitions;
+- deeper responsive gameplay transitions and interaction polish;
 - a sound toggle and lightweight state-driven animation;
 - fixed emoji reactions and approved rate-limit behavior in a later UI/transport increment.
+
+M12 is not started by this handoff.
 
 The client consumes safe projections and typed commands only. React must not import private
 poker-engine state, reproduce betting/settlement legality, calculate authoritative winners, or

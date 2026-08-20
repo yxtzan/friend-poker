@@ -108,4 +108,80 @@ describe("TableCommandClient", () => {
       vi.useRealTimers();
     }
   });
+
+  it("retries one lost ACK with the exact same command envelope", async () => {
+    vi.useFakeTimers();
+    try {
+      const projection = projectionFixture();
+      const emit = vi.fn();
+      const socket = { emit } as unknown as TableSocket;
+      const acceptProjection = vi.fn();
+      const client = new TableCommandClient(socket, {
+        getProjection: () => projection,
+        acceptProjection,
+        ackTimeoutMs: 50,
+      });
+
+      const first = client.submit({ type: "CALL" });
+      const firstRejection = expect(first).rejects.toBeInstanceOf(CommandAcknowledgementTimeoutError);
+      await vi.advanceTimersByTimeAsync(50);
+      await firstRejection;
+      const firstEnvelope = emit.mock.calls[0]?.[1] as Record<string, unknown>;
+
+      const retry = client.retryUncertain();
+      const secondEnvelope = emit.mock.calls[1]?.[1] as Record<string, unknown>;
+      expect(secondEnvelope.commandId).toBe(firstEnvelope.commandId);
+      expect(secondEnvelope.expectedVersion).toBe(firstEnvelope.expectedVersion);
+      expect(secondEnvelope.command).toEqual(firstEnvelope.command);
+
+      const acknowledge = emit.mock.calls[1]?.[2] as (result: CommandResult) => void;
+      acknowledge({
+        status: "DUPLICATE",
+        commandId: String(firstEnvelope.commandId),
+        version: 8,
+        originalVersion: 8,
+        originalStatus: "APPLIED",
+        data: { kind: "NONE" },
+        projection: { ...projection, version: 8 },
+      });
+      await expect(retry).resolves.toMatchObject({ status: "DUPLICATE" });
+      expect(emit).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("unblocks only after a newer authoritative projection makes the old envelope stale", async () => {
+    vi.useFakeTimers();
+    try {
+      const projection = projectionFixture();
+      const fresh = { ...projection, version: projection.version + 1, ownHoleCards: null };
+      let currentProjection = projection;
+      const emit = vi.fn();
+      const socket = { emit } as unknown as TableSocket;
+      const client = new TableCommandClient(socket, {
+        getProjection: () => currentProjection,
+        acceptProjection: vi.fn(),
+        ackTimeoutMs: 50,
+      });
+      const first = client.submit({ type: "FOLD" });
+      const firstRejection = expect(first).rejects.toBeInstanceOf(CommandAcknowledgementTimeoutError);
+      await vi.advanceTimersByTimeAsync(50);
+      await firstRejection;
+      currentProjection = fresh;
+      client.observeProjection(fresh);
+      const next = client.submit({ type: "CHECK" });
+      const acknowledge = emit.mock.calls[1]?.[2] as (result: CommandResult) => void;
+      acknowledge({
+        status: "APPLIED",
+        commandId: String((emit.mock.calls[1]?.[1] as Record<string, unknown>).commandId),
+        version: fresh.version + 1,
+        data: { kind: "NONE" },
+        projection: { ...fresh, version: fresh.version + 1 },
+      });
+      await expect(next).resolves.toMatchObject({ status: "APPLIED" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
