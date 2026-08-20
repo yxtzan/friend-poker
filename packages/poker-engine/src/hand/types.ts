@@ -126,6 +126,8 @@ export interface OrchestratedHandState {
 
 export interface HandRecordParticipant {
   readonly playerId: PlayerId;
+  /** Safe display metadata; private cards and server-only state remain excluded. */
+  readonly nickname?: string | null;
   readonly seat: Seat;
   readonly startingStack: number;
 }

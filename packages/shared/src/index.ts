@@ -149,6 +149,8 @@ export interface ViewerLegalActions {
 
 export interface PublicSessionPlayerSummary {
   readonly playerId: PlayerId;
+  /** Safe display data retained for history after the player leaves the table. */
+  readonly nickname?: string | null;
   readonly initialGrants: number;
   readonly replenishments: number;
   readonly hostAdjustments: number;
@@ -165,6 +167,8 @@ export interface PublicSessionSummary {
 
 export interface PublicHandParticipant {
   readonly playerId: PlayerId;
+  /** Safe display data retained for history after the player leaves the table. */
+  readonly nickname?: string | null;
   readonly seat: number;
   readonly startingStack: number;
 }
@@ -306,8 +310,24 @@ export interface SafeTableProjection {
 export const TransportEvent = Object.freeze({
   TableCommand: "TABLE_COMMAND",
   TableState: "TABLE_STATE",
+  TableReaction: "TABLE_REACTION",
   IdentityRevoked: "IDENTITY_REVOKED",
 } as const);
+
+export const REACTION_EMOJIS = Object.freeze(["😂", "😎", "😭", "🤔", "🔥", "👏"] as const);
+export type ReactionEmoji = (typeof REACTION_EMOJIS)[number];
+export const REACTION_WINDOW_MS = 1_000;
+export const REACTION_MAX_SUCCESSFUL = 4;
+
+export interface TableReactionInput {
+  readonly emoji: string;
+}
+
+export interface TableReactionEvent {
+  readonly reactionId: string;
+  readonly playerId: PlayerId;
+  readonly emoji: ReactionEmoji;
+}
 
 export interface IdentityResponse {
   readonly status: "CREATED" | "RESTORED" | "REENTERED";
@@ -465,6 +485,7 @@ export type CommandResult =
 
 export interface ServerToClientEvents {
   TABLE_STATE: (projection: SafeTableProjection) => void;
+  TABLE_REACTION: (reaction: TableReactionEvent) => void;
   IDENTITY_REVOKED: (event: { readonly reason: "KICKED" | "SESSION_ENDED" }) => void;
 }
 
@@ -480,4 +501,8 @@ export interface M11ClientToServerEvents {
     input: M11ClientCommandInput,
     acknowledge: (result: CommandResult) => void,
   ) => void;
+}
+
+export interface M12ClientToServerEvents extends M11ClientToServerEvents {
+  TABLE_REACTION: (input: TableReactionInput) => void;
 }

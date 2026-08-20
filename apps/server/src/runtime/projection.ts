@@ -57,13 +57,40 @@ function projectLedgerEntry(entry: ChipLedgerEntry): PublicLedgerEntryProjection
   });
 }
 
-function projectSessionSummary(summary: SessionSummary): PublicSessionSummary {
+function nicknameForPlayer(players: readonly TablePlayer[], playerId: string): string | null {
+  return players.find((player) => player.playerId === playerId)?.nickname ?? null;
+}
+
+function projectSessionSummary(
+  summary: SessionSummary,
+  players: readonly TablePlayer[],
+): PublicSessionSummary {
   return Object.freeze({
     sessionId: summary.sessionId,
     participantPlayerIds: Object.freeze([...summary.participantPlayerIds]),
-    players: Object.freeze(summary.players.map((player) => Object.freeze({ ...player }))),
+    players: Object.freeze(
+      summary.players.map((player) =>
+        Object.freeze({ ...player, nickname: nicknameForPlayer(players, player.playerId) }),
+      ),
+    ),
     handCount: summary.handCount,
   });
+}
+
+function projectTableHandRecord(
+  tableRecord: TableState["recentHands"][number],
+  players: readonly TablePlayer[],
+): TableState["recentHands"][number] {
+  return {
+    ...tableRecord,
+    record: {
+      ...tableRecord.record,
+      participants: tableRecord.record.participants.map((participant) => ({
+        ...participant,
+        nickname: nicknameForPlayer(players, participant.playerId),
+      })),
+    },
+  };
 }
 
 function projectSession(state: TableState): SessionProjection | null {
@@ -189,7 +216,11 @@ export function projectTableState(
         (hand) => hand.playerId === viewer.playerId,
       ),
     ownHoleCards: projectOwnCards(state.activeHand, viewer),
-    recentHands: state.recentHands.map((record) => safeClone(record)),
-    recentSessions: state.recentSessions.map(projectSessionSummary),
+    recentHands: state.recentHands.map((record) =>
+      safeClone(projectTableHandRecord(record, state.players)),
+    ),
+    recentSessions: state.recentSessions.map((summary) =>
+      projectSessionSummary(summary, state.players),
+    ),
   });
 }

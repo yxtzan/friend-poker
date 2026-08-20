@@ -3,7 +3,9 @@ import type {
   CommandResult,
   IdentityResponse,
   M11Command,
+  ReactionEmoji,
   SafeTableProjection,
+  TableReactionEvent,
 } from "@friend-poker/shared";
 import {
   attemptIdentityRecovery,
@@ -23,6 +25,8 @@ import {
 import { connectToTable, type TableSocket } from "../api/socket.js";
 import { acceptProjection, commandErrorMessage, identityErrorMessage } from "./projection.js";
 import { TransportEvent } from "@friend-poker/shared";
+import { ReactionRateLimiter } from "./reactions.js";
+import { TableSoundPlayer } from "./sound.js";
 
 export type AppPhase =
   | "BOOTING"
@@ -51,16 +55,23 @@ export interface TableAppState {
   readonly canReenterAfterKick: boolean;
   readonly pendingCommand: M11Command["type"] | null;
   readonly uncertainCommand: { readonly commandId: string; readonly type: M11Command["type"] } | null;
+  readonly reactions: readonly TableReactionEvent[];
+  readonly reactionEggVisible: boolean;
+  readonly closeReactionEgg: () => void;
+  readonly soundEnabled: boolean;
   readonly notice: string | null;
   readonly setNickname: (nickname: string) => void;
   readonly setPosition: (position: EntryPosition) => void;
   readonly submitEntry: () => Promise<void>;
   readonly submitCommand: (command: M11Command) => Promise<CommandResult | null>;
   readonly retryUncertainCommand: () => Promise<CommandResult | null>;
+  readonly sendReaction: (emoji: ReactionEmoji) => void;
+  readonly setSoundEnabled: (enabled: boolean) => void;
   readonly retry: () => void;
 }
 
 const SAVED_NICKNAME_KEY = "friend-poker:nickname";
+const SOUND_ENABLED_KEY = "friend-poker:sound-enabled";
 
 function savedNickname(): string {
   try {
@@ -75,6 +86,22 @@ function saveNickname(nickname: string): void {
     window.localStorage.setItem(SAVED_NICKNAME_KEY, nickname);
   } catch {
     // A blocked storage API does not affect the HttpOnly credential flow.
+  }
+}
+
+function savedSoundEnabled(): boolean {
+  try {
+    return window.localStorage.getItem(SOUND_ENABLED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function saveSoundEnabled(enabled: boolean): void {
+  try {
+    window.localStorage.setItem(SOUND_ENABLED_KEY, String(enabled));
+  } catch {
+    // A blocked storage API leaves sound opt-in for this session only.
   }
 }
 
@@ -107,6 +134,9 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
   const [canReenterAfterKick, setCanReenterAfterKick] = useState(false);
   const [pendingCommand, setPendingCommand] = useState<M11Command["type"] | null>(null);
   const [uncertainCommand, setUncertainCommand] = useState<TableAppState["uncertainCommand"]>(null);
+  const [reactions, setReactions] = useState<readonly TableReactionEvent[]>([]);
+  const [reactionEggVisible, setReactionEggVisible] = useState(false);
+  const [soundEnabled, setSoundEnabledState] = useState(savedSoundEnabled);
   const [notice, setNotice] = useState<string | null>(null);
   const projectionRef = useRef<SafeTableProjection | null>(null);
   const socketRef = useRef<TableSocket | null>(null);
@@ -117,10 +147,37 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
   const enterRef = useRef(enter);
   const createSocketRef = useRef(createSocket);
   const commandAckTimeoutRef = useRef(options.commandAckTimeoutMs);
+  const identityRef = useRef<IdentityResponse | null>(null);
+  const projectionForSoundRef = useRef<SafeTableProjection | null>(null);
+  const soundEnabledRef = useRef(soundEnabled);
+  const reactionLimiterRef = useRef(new ReactionRateLimiter());
+  const reactionTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const soundPlayerRef = useRef(new TableSoundPlayer());
+  const persistedSoundUnlockPendingRef = useRef(savedSoundEnabled());
   restoreRef.current = restore;
   enterRef.current = enter;
   createSocketRef.current = createSocket;
   commandAckTimeoutRef.current = options.commandAckTimeoutMs;
+  soundEnabledRef.current = soundEnabled;
+
+  useEffect(() => {
+    if (!soundEnabled || !persistedSoundUnlockPendingRef.current || typeof window === "undefined") return;
+
+    const unlockAfterActivation = (): void => {
+      if (!persistedSoundUnlockPendingRef.current) return;
+      persistedSoundUnlockPendingRef.current = false;
+      soundPlayerRef.current.unlock();
+      window.removeEventListener("pointerdown", unlockAfterActivation);
+      window.removeEventListener("keydown", unlockAfterActivation);
+    };
+
+    window.addEventListener("pointerdown", unlockAfterActivation);
+    window.addEventListener("keydown", unlockAfterActivation);
+    return () => {
+      window.removeEventListener("pointerdown", unlockAfterActivation);
+      window.removeEventListener("keydown", unlockAfterActivation);
+    };
+  }, [soundEnabled]);
 
   const acceptAuthoritativeProjection = useCallback((next: SafeTableProjection): void => {
     commandClientRef.current?.observeProjection(next);
@@ -132,12 +189,41 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     });
   }, []);
 
+  useEffect(() => {
+    const previous = projectionForSoundRef.current;
+    const viewerId = identityRef.current?.playerId;
+    if (previous !== null && viewerId !== undefined && soundEnabledRef.current) {
+      const previousHand = previous.currentHand;
+      const nextHand = projection?.currentHand;
+      if (
+        nextHand?.currentActorId === viewerId &&
+        previousHand?.currentActorId !== viewerId
+      ) {
+        soundPlayerRef.current.play("TURN");
+      } else if (
+        previousHand?.street !== nextHand?.street &&
+        nextHand !== null &&
+        nextHand !== undefined
+      ) {
+        soundPlayerRef.current.play("STREET");
+      } else if (
+        previousHand?.status !== "COMPLETE" &&
+        nextHand?.status === "COMPLETE"
+      ) {
+        soundPlayerRef.current.play("COMPLETE");
+      }
+    }
+    projectionForSoundRef.current = projection;
+  }, [projection]);
+
   const connectSocket = useCallback(
     (nextIdentity: IdentityResponse): void => {
       socketRef.current?.disconnect();
       explicitLeaveRef.current = false;
       const socket = createSocketRef.current();
       socketRef.current = socket;
+      identityRef.current = nextIdentity;
+      projectionForSoundRef.current = null;
       commandClientRef.current = new TableCommandClient(socket, {
         getProjection: () => projectionRef.current,
         acceptProjection: acceptAuthoritativeProjection,
@@ -146,9 +232,20 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
           : { ackTimeoutMs: commandAckTimeoutRef.current }),
       });
       setUncertainCommand(null);
+      setReactions([]);
+      setReactionEggVisible(false);
       setIdentity(nextIdentity);
       setPhase("CONNECTING");
       socket.on(TransportEvent.TableState, acceptAuthoritativeProjection);
+      socket.on(TransportEvent.TableReaction, (reaction) => {
+        setReactions((previous) => [...previous, reaction].slice(-12));
+        if (soundEnabledRef.current) soundPlayerRef.current.playReaction(reaction.emoji);
+        const timer = setTimeout(() => {
+          setReactions((previous) => previous.filter((candidate) => candidate.reactionId !== reaction.reactionId));
+          reactionTimersRef.current.delete(reaction.reactionId);
+        }, 2_400);
+        reactionTimersRef.current.set(reaction.reactionId, timer);
+      });
       socket.on("connect", () => {
         setPhase("CONNECTED");
         setNotice(null);
@@ -170,9 +267,11 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
       socket.on(TransportEvent.IdentityRevoked, (event) => {
         explicitLeaveRef.current = true;
         socket.disconnect();
+        identityRef.current = null;
         setProjection(null);
         setIdentity(null);
         setUncertainCommand(null);
+        setReactions([]);
         setPhase(event.reason === "SESSION_ENDED" ? "SESSION_ENDED" : "REVOKED");
         setNotice(
           event.reason === "SESSION_ENDED"
@@ -183,6 +282,35 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     },
     [acceptAuthoritativeProjection],
   );
+
+  const sendReaction = useCallback((emoji: ReactionEmoji): void => {
+    const decision = reactionLimiterRef.current.attempt();
+    if (!decision.accepted) {
+      if (decision.showEgg) {
+        setReactionEggVisible(true);
+      }
+      return;
+    }
+    socketRef.current?.emit(TransportEvent.TableReaction, { emoji });
+  }, []);
+
+  const setSoundEnabled = useCallback((enabled: boolean): void => {
+    setSoundEnabledState(enabled);
+    soundEnabledRef.current = enabled;
+    saveSoundEnabled(enabled);
+    persistedSoundUnlockPendingRef.current = false;
+    if (enabled) soundPlayerRef.current.unlock();
+  }, []);
+
+  const closeReactionEgg = useCallback((): void => {
+    setReactionEggVisible(false);
+  }, []);
+
+  useEffect(() => () => {
+    for (const timer of reactionTimersRef.current.values()) clearTimeout(timer);
+    reactionTimersRef.current.clear();
+    soundPlayerRef.current.dispose();
+  }, []);
 
   const boot = useCallback((): void => {
     const bootSequence = bootSequenceRef.current + 1;
@@ -269,6 +397,9 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
       } else {
         setNotice(null);
       }
+      if (result.status !== "REJECTED" && soundEnabledRef.current) {
+        soundPlayerRef.current.play("ACK");
+      }
       if (command.type === "LEAVE_TABLE" && result.status !== "REJECTED") {
         explicitLeaveRef.current = true;
         socketRef.current?.disconnect();
@@ -280,6 +411,9 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
       if (error instanceof CommandAcknowledgementTimeoutError) {
         setUncertainCommand(uncertainCommandState(commandClient));
         setNotice("操作确认超时，服务器可能已经处理；请以最新牌桌状态为准");
+      } else if (error instanceof CommandReconciledByProjectionError) {
+        setUncertainCommand(null);
+        setNotice("牌桌状态已更新，上一条操作已结束");
       } else if (error instanceof UncertainCommandError) {
         setNotice("上一条操作尚未确认，请先重新确认");
       } else {
@@ -333,6 +467,10 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     position,
     pendingCommand,
     uncertainCommand,
+    reactions,
+    reactionEggVisible,
+    closeReactionEgg,
+    soundEnabled,
     notice,
     setNickname: (nextNickname) => {
       setNickname(nextNickname);
@@ -343,6 +481,8 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     submitEntry,
     submitCommand,
     retryUncertainCommand,
+    sendReaction,
+    setSoundEnabled,
     retry: boot,
   };
 }

@@ -1,10 +1,10 @@
 # Friend Poker Web
 
-Milestone 10 adds the first browser client: a Chinese entry/recovery screen,
-Socket.IO projection synchronization, and a six-seat table shell. The browser
-only receives `SafeTableProjection` and sends the presence commands approved for
-this milestone (`SIT`, `STAND_TO_SPECTATE`, and `LEAVE_TABLE`). Poker actions,
-host controls, history, reactions, sound, and deployment remain deferred.
+The browser is a Chinese, projection-only client for the private six-seat table.
+It uses HttpOnly-cookie identity recovery, server-derived legal actions, typed
+versioned commands, safe recent hand/Session history, fixed transient reactions,
+opt-in Web Audio cues, and responsive table controls. It never imports the
+server runtime or private poker-engine state.
 
 ## Local development
 
@@ -29,5 +29,10 @@ Useful checks:
 
 ```sh
 npm run test --workspace @friend-poker/web
+npm run typecheck --workspace @friend-poker/web
 npm run build --workspace @friend-poker/web
 ```
+
+The Vite client proxies `/identity`, `/health`, and `/socket.io` to the server.
+For a non-default Vite port, set the server's `ALLOWED_ORIGINS` to the exact
+frontend origin used by the browser; do not use a wildcard in production.

@@ -55,6 +55,7 @@ export async function createTransportFixture(
     readonly hostDisconnectGraceMs?: number;
     readonly allOfflineTimeoutMs?: number;
     readonly runoutStageDelayMs?: number;
+    readonly reactionClock?: () => number;
   } = {},
 ) {
   let credentialSequence = 0;
@@ -88,6 +89,7 @@ export async function createTransportFixture(
     ...(options.runoutStageDelayMs === undefined
       ? {}
       : { runoutStageDelayMs: options.runoutStageDelayMs }),
+    ...(options.reactionClock === undefined ? {} : { reactionClock: options.reactionClock }),
   });
   const listening = await server.listen();
   const sockets = new Set<TestSocket>();

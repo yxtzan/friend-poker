@@ -3,7 +3,7 @@ import type {
   EntryPosition as SharedEntryPosition,
   IdentityResponse as SharedIdentityResponse,
   M11ClientCommandInput as SharedM11ClientCommandInput,
-  M11ClientToServerEvents as SharedM11ClientToServerEvents,
+  M12ClientToServerEvents as SharedM12ClientToServerEvents,
   ServerToClientEvents as SharedServerToClientEvents,
   TransportErrorResponse as SharedTransportErrorResponse,
 } from "@friend-poker/shared";
@@ -18,7 +18,7 @@ export type TransportErrorResponse = SharedTransportErrorResponse;
 
 export type ServerToClientEvents = SharedServerToClientEvents;
 
-export type ClientToServerEvents = SharedM11ClientToServerEvents;
+export type ClientToServerEvents = SharedM12ClientToServerEvents;
 
 export type InterServerEvents = Record<never, never>;
 

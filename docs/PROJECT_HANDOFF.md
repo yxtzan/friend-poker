@@ -1,11 +1,12 @@
 # Friend Poker Project Handoff
 
-Canonical fast-recovery reference for the repository state after the Milestone 11 playable
-controls implementation.
+Canonical fast-recovery reference for the repository state after the Milestone 12 product
+completion implementation.
 
-- Verified main baseline before M11: `d02983e Rescue Milestone 10 visual foundation`
+- Verified main baseline before M12: `bc64ee3 Implement Milestone 11 playable controls`
 - Last repository verification: 2026-08-20
-- Next major phase: M12 interaction polish, reactions/sound, and deployment readiness
+- M12 working branch: `agent/milestone-12-product-completion`
+- Next major phase: a new approved milestone after Draft PR review; do not infer scope here
 
 This file describes the current implementation snapshot, not an intermediate milestone or a
 chat transcript.
@@ -96,10 +97,11 @@ reimplement poker rules or become alternate sources of game truth.
 
 ### `packages/shared`
 
-Browser-safe DTOs, public projection shapes, transport event names, identity responses, and
-the M11 intent-only command envelope. It contains no server runtime, persistence, credential,
-or private-hand implementation. `SafeTableProjection.viewerLegalActions` is a server-derived,
-current-viewer-only action summary; it is null for spectators and non-acting viewers.
+Browser-safe DTOs, public projection shapes, transport event names, identity responses, the M11
+intent-only command envelope, and the fixed M12 reaction contract. It contains no server
+runtime, persistence, credential, or private-hand implementation. `SafeTableProjection.viewerLegalActions`
+is a server-derived, current-viewer-only action summary; it is null for spectators and
+non-acting viewers.
 
 ### `apps/web`
 
@@ -115,6 +117,9 @@ React + TypeScript + Vite client foundation:
   same-envelope retry after an acknowledgement timeout;
 - manual Session start/first-hand/next-hand flow, replenishment, blind changes, ledger-backed
   host chip adjustments, host transfer, kick, host force-Fold, and preview-confirmed Session end;
+- static hand-ranking reference, safe recent hand history, retained Session summaries, six fixed
+  transient emoji reactions with server rate limiting, opt-in sound cues, lightweight state
+  motion, and responsive/accessibility polish;
 - reconnect, disconnect, revocation, stale-version, duplicate, and server-error feedback.
 - `apps/web/DESIGN.md` is the canonical frontend visual-direction reference for M10.5 and later UI work.
 
@@ -137,10 +142,11 @@ authenticated socket identity before invoking the runtime.
 | M9 | `Implement Milestone 9 persistence recovery` | COMPLETE, merged | Prisma/SQLite checkpoints, durable identity/idempotency/recovery |
 | M10 | Web foundation | IMPLEMENTED | Browser entry/recovery shell, safe shared contracts, six-seat public table projection, and presence commands |
 | M11 | Fully playable game controls and host/session controls | IMPLEMENTED | Viewer-scoped legal actions, intent-only browser commands, playable betting UI, Session flow, replenishment, host controls, and acknowledgement-loss retry |
+| M12 | Product completion and acceptance | IMPLEMENTED | Hand-ranking reference, safe history/Session summaries, reactions, opt-in sound, reduced-motion polish, initial TABLE_STATE command reconciliation, responsive/accessibility QA, and deployment readiness |
 
 Merged main milestones through M9 are visible in Git history from `cdf71e0` through `de44515`.
-M10 and M11 are implemented in the current snapshot; history browsing, interaction polish,
-and deployment remain future work.
+M10 through M12 are implemented in the current snapshot. Production deployment remains
+intentionally unperformed.
 
 ## 5. Critical invariants
 
@@ -338,12 +344,12 @@ not technical debt to “fix” casually by persisting decks or private hole car
 
 ## 12. Current test baseline
 
-Verified on the M11 implementation snapshot based on branch `agent/milestone-11-playable-controls`
-and baseline `main@d02983e`:
+Verified on the M12 implementation snapshot based on branch
+`agent/milestone-12-product-completion` and baseline `main@bc64ee3`:
 
-- standard suite: **376 tests** total;
-- `apps/server`: **104 tests** across 10 test files;
-- `apps/web`: **23 tests** across 7 test files;
+- standard suite: **394 tests** total;
+- `apps/server`: **110 tests** across 13 test files;
+- `apps/web`: **35 tests** across 10 test files;
 - `packages/poker-engine`: **249 tests** across 28 test files;
 - exhaustive evaluator suite: **1 additional exhaustive test**;
 - CI migration smoke step, `npm run db:migrate:deploy --workspace @friend-poker/server`, remains
@@ -382,6 +388,9 @@ V1 intentionally has no PostgreSQL, Redis, distributed lock, or horizontal scali
 one replica would require a deliberate redesign of database concurrency, command ordering,
 Socket.IO coordination, lifecycle ownership, and deployment policy.
 
+See `docs/DEPLOYMENT_READINESS.md` for the M12 pre-deploy checklist. No production deployment
+was run.
+
 ## 14. Deliberate non-goals
 
 V1 excludes:
@@ -395,33 +404,23 @@ V1 excludes:
 - long-term analytics/rankings such as VPIP/PFR leaderboards;
 - distributed infrastructure, microservices, Redis, Kubernetes, and multi-replica operation.
 
-## 15. Known limitations after M11
+## 15. Known limitations after M12
 
-- M11 covers the playable betting and host/session control path, but does not add a dedicated
-  history browser or Session-summary screen; safe history remains in the projection contract
-  for a later client surface.
-- Sound, fixed emoji reactions, lightweight state-driven animation, and deployment execution
-  remain intentionally deferred to later work.
-- Railway configuration is documented but the application has not been deployed by the
-  repository work through M11.
+- Railway configuration is documented and locally checked, but production deployment has not
+  been performed by repository work.
+- The local acceptance environment used Node 24 despite the repository's required Node 22 range;
+  deployment must use Node 22.x and CI remains the authoritative environment check.
 - Persistence is deliberately constrained to SQLite and one process/replica.
 - A process crash during a hand rolls back that unfinished hand to the pre-hand checkpoint.
 - Exact persistent in-hand recovery is not supported and is intentionally out of scope.
 
-Do not list already-fixed M5–M9 review defects as current limitations.
+Do not list already-fixed M5–M11 review defects as current limitations.
 
-## 16. Next phase: interaction polish and deployment readiness
+## 16. Next phase
 
-The next implementation phase should be planned in a new approved milestone rather than
-started from this document. Expected remaining client/product work includes:
-
-- recent hand history and Session-summary presentation;
-- expanded reconnect, offline, revocation, stale-command, and error feedback across gameplay;
-- deeper responsive gameplay transitions and interaction polish;
-- a sound toggle and lightweight state-driven animation;
-- fixed emoji reactions and approved rate-limit behavior in a later UI/transport increment.
-
-M12 is not started by this handoff.
+M12 is complete. Any further work must be proposed as a new approved milestone and must not be
+inferred from this handoff. Production deployment and Draft PR/CI review remain release-process
+steps, not permission to redesign the product.
 
 The client consumes safe projections and typed commands only. React must not import private
 poker-engine state, reproduce betting/settlement legality, calculate authoritative winners, or

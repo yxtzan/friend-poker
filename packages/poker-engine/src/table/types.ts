@@ -82,6 +82,8 @@ export interface TableHandRecord {
 
 export interface SessionPlayerSummary {
   readonly playerId: PlayerId;
+  /** Safe display metadata for session history. */
+  readonly nickname?: string | null;
   readonly initialGrants: number;
   readonly replenishments: number;
   readonly hostAdjustments: number;

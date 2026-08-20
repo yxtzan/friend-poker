@@ -1,7 +1,8 @@
 # Friend Poker server
 
-Milestone 9 provides one permanent Express and Socket.IO table backed by a
-Prisma/SQLite recovery store. The v1 production shape is deliberately narrow:
+M12 retains one permanent Express and Socket.IO table backed by a Prisma/SQLite
+recovery store and adds only an ephemeral, fixed emoji reaction channel. The v1
+production shape is deliberately narrow:
 one Railway application replica and one persistent Railway Volume. There are
 no rooms, lobby, UI, PostgreSQL, Redis, or horizontal scaling.
 
@@ -20,6 +21,11 @@ The checkpoint contains only safe non-hand state: Session, balances, ledger,
 seats, host, blinds, the newest 20 safe hand records, and the newest 20 Session
 summaries. Serialization rejects `HAND_IN_PROGRESS` and never writes an active
 hand's deck, private cards, or betting state.
+
+Socket reactions accept only the six shared emoji values, broadcast no private
+state, and are limited independently per authenticated player to four accepted
+reactions in a one-second rolling window. A fifth attempt starts a one-second
+server cooldown; reactions are never persisted.
 
 Starting a hand leaves the prior non-hand checkpoint untouched. If the process
 dies before the hand completes and commits, restart restores that checkpoint:
@@ -114,7 +120,8 @@ npm run db:migrate:deploy --workspace @friend-poker/server && npm start --worksp
 
 Do not run the production migration during image build because Railway Volumes
 are not mounted then. This milestone documents the deployment but does not
-perform it.
+perform it. See [`docs/DEPLOYMENT_READINESS.md`](../../docs/DEPLOYMENT_READINESS.md)
+for the final pre-deploy checklist.
 
 ## Socket and lifecycle boundaries
 

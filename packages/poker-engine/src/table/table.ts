@@ -326,6 +326,7 @@ function sessionPlayerSummary(
   );
   return freezePlayerSummary({
     playerId,
+    ...(player.nickname === null ? {} : { nickname: player.nickname }),
     initialGrants,
     replenishments,
     hostAdjustments,
