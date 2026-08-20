@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   HandLifecycleStatus,
   M11CommandType,
+  type ReactionEmoji,
   Street,
   TableLifecycleStatus,
+  type TableReactionEvent,
   type CommandResult,
   type M11Command,
   type PublicSessionEndPreview,
@@ -12,6 +14,7 @@ import {
 } from "@friend-poker/shared";
 import { PlayingCard } from "./card.js";
 import { Seat } from "./seat.js";
+import { HandRankingDrawer, HistoryDrawer } from "./secondary-drawers.js";
 import type { AppPhase, TableAppState } from "../state/use-table-app.js";
 import {
   calculatePotQuickTarget,
@@ -27,6 +30,11 @@ interface TableShellProps {
   readonly notice: string | null;
   readonly onCommand: (command: M11Command) => Promise<CommandResult | null> | undefined;
   readonly onRetryUncertain?: () => void;
+  readonly reactions?: readonly TableReactionEvent[];
+  readonly reactionEggVisible?: boolean;
+  readonly onReaction?: (emoji: ReactionEmoji) => void;
+  readonly soundEnabled?: boolean;
+  readonly onSoundEnabledChange?: (enabled: boolean) => void;
 }
 
 const SEATS: readonly TableSeat[] = [0, 1, 2, 3, 4, 5];
@@ -113,7 +121,16 @@ export function TableShell({
   notice,
   onCommand,
   onRetryUncertain = () => undefined,
+  reactions = [],
+  reactionEggVisible = false,
+  onReaction = () => undefined,
+  soundEnabled = false,
+  onSoundEnabledChange = () => undefined,
 }: TableShellProps) {
+  const [surface, setSurface] = useState<"RANKING" | "HANDS" | "SESSIONS" | null>(null);
+  const rankingTriggerRef = useRef<HTMLButtonElement>(null);
+  const handsTriggerRef = useRef<HTMLButtonElement>(null);
+  const sessionsTriggerRef = useRef<HTMLButtonElement>(null);
   const hand = projection.currentHand;
   const viewerSeat = projection.seats.find((player) => player?.playerId === viewerId)?.seat ?? null;
   const viewerIsSpectator = viewerSeat === null;
@@ -126,6 +143,10 @@ export function TableShell({
   ) ?? false;
   const activeUncertainCommand = uncertainCommand ?? null;
   const actionBlocked = pendingCommand !== null || activeUncertainCommand !== null;
+  const seatReactions = (seat: TableSeat) => reactions.filter((reaction) => projection.seats[seat]?.playerId === reaction.playerId);
+  const floatingSpectatorReactions = reactions.filter(
+    (reaction) => !projection.seats.some((player) => player?.playerId === reaction.playerId),
+  );
 
   return (
     <main className="table-page">
@@ -162,6 +183,21 @@ export function TableShell({
         </span>
         <span className="table-meta-item">房主 · {host?.nickname ?? "暂无"}</span>
         {hand !== null && <span className="table-meta-item">{streetLabel(hand.street)} · {handStatusLabel(hand.status)}</span>}
+      </section>
+
+      <section className="table-tools" aria-label="牌桌辅助工具">
+        <div className="table-tool-buttons">
+          <button ref={rankingTriggerRef} type="button" className="tool-button" aria-haspopup="dialog" onClick={() => setSurface("RANKING")}>牌型表</button>
+          <button ref={handsTriggerRef} type="button" className="tool-button" aria-haspopup="dialog" onClick={() => setSurface("HANDS")}>最近手牌 <span>{projection.recentHands.length}</span></button>
+          <button ref={sessionsTriggerRef} type="button" className="tool-button" aria-haspopup="dialog" onClick={() => setSurface("SESSIONS")}>本场记录 <span>{projection.recentSessions.length}</span></button>
+          <button type="button" className="tool-button sound-toggle" aria-pressed={soundEnabled} onClick={() => onSoundEnabledChange(!soundEnabled)}>声音 {soundEnabled ? "开" : "关"}</button>
+        </div>
+        <div className="reaction-controls" aria-label="快捷表情">
+          <span className="utility-label">回应</span>
+          {(["😂", "😎", "😭", "🤔", "🔥", "👏"] as const).map((emoji) => <button type="button" className="reaction-button" aria-label={`发送表情${emoji}`} key={emoji} onClick={() => onReaction(emoji)}>{emoji}</button>)}
+          {reactionEggVisible && <span className="reaction-egg" role="status">你急了</span>}
+        </div>
+        {floatingSpectatorReactions.length > 0 && <div className="reaction-overflow" aria-label="最新回应">{floatingSpectatorReactions.map((reaction) => <span className="reaction-overflow-item" key={reaction.reactionId}>{reaction.emoji}</span>)}</div>}
       </section>
 
       <section className="poker-table-wrap" aria-label="六人牌桌">
@@ -213,6 +249,7 @@ export function TableShell({
                   {hand?.smallBlindSeat === seat && <span className="position-badge blind-badge">SB</span>}
                   {hand?.bigBlindSeat === seat && <span className="position-badge blind-badge">BB</span>}
                 </div>
+                {seatReactions(seat).map((reaction) => <span className="seat-reaction" role="status" aria-label={`${displayNameForId(projection, reaction.playerId)} 发送了 ${reaction.emoji}`} key={reaction.reactionId}>{reaction.emoji}</span>)}
               </div>
             );
           })}
@@ -276,6 +313,19 @@ export function TableShell({
           onCommand={onCommand}
         />
       )}
+
+      <HandRankingDrawer
+        open={surface === "RANKING"}
+        onClose={() => setSurface(null)}
+        triggerRef={rankingTriggerRef}
+      />
+      <HistoryDrawer
+        open={surface === "HANDS" || surface === "SESSIONS"}
+        initialTab={surface === "SESSIONS" ? "SESSIONS" : "HANDS"}
+        onClose={() => setSurface(null)}
+        triggerRef={surface === "SESSIONS" ? sessionsTriggerRef : handsTriggerRef}
+        projection={projection}
+      />
     </main>
   );
 }

@@ -178,6 +178,7 @@ const activeSessionSchema = z.object({
 }).strict();
 const sessionPlayerSummarySchema = z.object({
   playerId: playerIdSchema,
+  nickname: z.string().nullable().optional(),
   initialGrants: z.number().int(),
   replenishments: z.number().int(),
   hostAdjustments: z.number().int(),

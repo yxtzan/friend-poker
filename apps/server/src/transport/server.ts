@@ -9,6 +9,7 @@ import type { Socket } from "socket.io";
 
 import { TableLifecycleStatus } from "@friend-poker/poker-engine";
 import type { PlayerId, RandomSource, TableSeat } from "@friend-poker/poker-engine";
+import { REACTION_EMOJIS } from "@friend-poker/shared";
 import {
   CommandRejectionReason,
   RuntimeCommandType,
@@ -38,6 +39,7 @@ import { validateNickname } from "./nickname.js";
 import { LifecycleController } from "./lifecycle.js";
 import type { LifecycleScheduler } from "./scheduler.js";
 import { SystemLifecycleScheduler } from "./scheduler.js";
+import { ReactionRateLimiter } from "./reactions.js";
 import { TransportEvent } from "./types.js";
 import type {
   ClientCommandInput,
@@ -333,6 +335,7 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
     },
   });
   const socketIdByPlayer = new Map<PlayerId, string>();
+  const reactionRateLimiter = new ReactionRateLimiter();
   const clientSitInitialGrants = new ClientSitInitialGrantRegistry();
   clientSitInitialGrants.seed(options.initialSitInitialGrantCommands ?? []);
   let persistenceHealthy = true;
@@ -948,9 +951,22 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
       });
     });
 
+    socket.on(TransportEvent.TableReaction, (input) => {
+      const emoji = isRecord(input) && typeof input.emoji === "string"
+        ? REACTION_EMOJIS.find((candidate) => candidate === input.emoji)
+        : undefined;
+      if (emoji === undefined || !reactionRateLimiter.tryAccept(playerId)) return;
+      io.emit(TransportEvent.TableReaction, {
+        reactionId: `reaction-${randomUUID()}`,
+        playerId,
+        emoji,
+      });
+    });
+
     socket.on("disconnect", () => {
       if (socketIdByPlayer.get(playerId) !== socket.id) return;
       socketIdByPlayer.delete(playerId);
+      reactionRateLimiter.clear(playerId);
       if (socket.data.suppressOffline === true) return;
       void executeSystem({
         type: RuntimeCommandType.SetOnline,

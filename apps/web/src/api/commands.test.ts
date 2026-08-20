@@ -209,4 +209,50 @@ describe("TableCommandClient", () => {
       vi.useRealTimers();
     }
   });
+
+  it("reconciles an initial in-flight command when a newer table state arrives first", async () => {
+    vi.useFakeTimers();
+    try {
+      const projection = projectionFixture();
+      const fresh = { ...projection, version: projection.version + 1, ownHoleCards: null };
+      const emit = vi.fn();
+      const socket = { emit } as unknown as TableSocket;
+      const client = new TableCommandClient(socket, {
+        getProjection: () => projection,
+        acceptProjection: vi.fn(),
+        ackTimeoutMs: 50,
+      });
+
+      const submission = client.submit({ type: "CHECK" });
+      expect(emit).toHaveBeenCalledTimes(1);
+      client.observeProjection(fresh);
+
+      await expect(submission).rejects.toBeInstanceOf(CommandReconciledByProjectionError);
+      expect(client.uncertainCommand).toBeNull();
+
+      const lateAcknowledge = emit.mock.calls[0]?.[2] as (result: CommandResult) => void;
+      lateAcknowledge({
+        status: "APPLIED",
+        commandId: String((emit.mock.calls[0]?.[1] as Record<string, unknown>).commandId),
+        version: fresh.version,
+        data: { kind: "NONE" },
+        projection: fresh,
+      });
+      await vi.advanceTimersByTimeAsync(50);
+
+      const next = client.submit({ type: "FOLD" });
+      expect(emit).toHaveBeenCalledTimes(2);
+      const nextAcknowledge = emit.mock.calls[1]?.[2] as (result: CommandResult) => void;
+      nextAcknowledge({
+        status: "APPLIED",
+        commandId: String((emit.mock.calls[1]?.[1] as Record<string, unknown>).commandId),
+        version: fresh.version + 1,
+        data: { kind: "NONE" },
+        projection: { ...fresh, version: fresh.version + 1 },
+      });
+      await expect(next).resolves.toMatchObject({ status: "APPLIED" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

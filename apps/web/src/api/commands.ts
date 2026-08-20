@@ -112,18 +112,29 @@ export class TableCommandClient {
     // version, that envelope can no longer newly apply. It is safe to unblock
     // the next user action; an already-applied command is represented by the
     // newer projection, while an unapplied one is now stale.
-    if (
-      this.#uncertainEnvelope !== null &&
-      projection.version > this.#uncertainEnvelope.expectedVersion
-    ) {
-      const commandId = this.#uncertainEnvelope.commandId;
-      const lifecycle = this.#lifecycles.get(commandId);
-      this.#uncertainEnvelope = null;
-      if (lifecycle !== undefined) {
-        this.#reconcileByProjection(lifecycle);
-        return;
+    if (this.#uncertainEnvelope !== null) {
+      const uncertain = this.#uncertainEnvelope;
+      if (projection.version > uncertain.expectedVersion) {
+        const lifecycle = this.#lifecycles.get(uncertain.commandId);
+        this.#uncertainEnvelope = null;
+        if (lifecycle !== undefined) {
+          this.#reconcileByProjection(lifecycle);
+          return;
+        }
+        this.#releaseInFlight(uncertain.commandId);
       }
-      this.#releaseInFlight(commandId);
+      return;
+    }
+
+    const inFlightCommandId = this.#inFlightCommandId;
+    if (inFlightCommandId !== null) {
+      const lifecycle = this.#lifecycles.get(inFlightCommandId);
+      if (
+        lifecycle !== undefined &&
+        projection.version > lifecycle.input.expectedVersion
+      ) {
+        this.#reconcileByProjection(lifecycle);
+      }
     }
   }
 
@@ -227,8 +238,10 @@ export class TableCommandClient {
       }, this.#ackTimeoutMs);
 
       const acknowledge = (result: CommandResult): void => {
-        this.#acceptProjection(result.projection);
-        if (lifecycle.terminal) return;
+        if (lifecycle.terminal) {
+          this.#acceptProjection(result.projection);
+          return;
+        }
         if (result.commandId === input.commandId) {
           lifecycle.acknowledged = true;
           lifecycle.terminal = true;
@@ -239,12 +252,14 @@ export class TableCommandClient {
           }
           releaseInFlight();
           forgetIfComplete();
+          this.#acceptProjection(result.projection);
           return;
         }
         settleAttempt(() => {
           releaseInFlight();
           resolve(result);
         });
+        this.#acceptProjection(result.projection);
       };
 
       try {
@@ -260,6 +275,9 @@ export class TableCommandClient {
 
   #reconcileByProjection(lifecycle: CommandLifecycle): void {
     lifecycle.terminal = true;
+    if (this.#uncertainEnvelope?.commandId === lifecycle.input.commandId) {
+      this.#uncertainEnvelope = null;
+    }
     const error = new CommandReconciledByProjectionError(lifecycle.input.commandId);
     for (const attempt of [...lifecycle.attempts]) {
       if (attempt.settled) continue;

@@ -118,6 +118,40 @@ describe("useTableApp", () => {
     expect(commandResult?.status).toBe("REJECTED");
   });
 
+  it("reconciles an in-flight command from an initial newer TABLE_STATE", async () => {
+    const socket = new FakeSocket();
+    const { result } = renderHook(() =>
+      useTableApp({
+        restoreIdentity: async () => identity,
+        createSocket: () => socket as unknown as TableSocket,
+        commandAckTimeoutMs: 20,
+      }),
+    );
+    const initial = projectionFixture({ version: 30 });
+    const newer = projectionFixture({ version: 31, ownHoleCards: null });
+
+    await waitFor(() => expect(result.current.phase).toBe("CONNECTING"));
+    act(() => {
+      socket.trigger("connect");
+      socket.trigger(TransportEvent.TableState, initial);
+    });
+
+    let commandPromise: Promise<CommandResult | null> | undefined;
+    act(() => {
+      commandPromise = result.current.submitCommand({ type: "CHECK" });
+    });
+    await waitFor(() => expect(socket.emitted).toHaveLength(1));
+
+    act(() => socket.trigger(TransportEvent.TableState, newer));
+    if (commandPromise === undefined) throw new Error("command was not submitted");
+    await expect(commandPromise).resolves.toBeNull();
+    await waitFor(() => expect(result.current.pendingCommand).toBeNull());
+    expect(result.current.uncertainCommand).toBeNull();
+    expect(result.current.projection).toBe(newer);
+    expect(result.current.notice).toBe("牌桌状态已更新，上一条操作已结束");
+    expect(socket.emitted).toHaveLength(1);
+  });
+
   it("clears pending presence commands after disconnect timeout without retrying", async () => {
     const socket = new FakeSocket();
     const { result } = renderHook(() =>
