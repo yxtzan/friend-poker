@@ -190,6 +190,57 @@ describe("TableShell", () => {
     expect(screen.queryByLabelText("上一动作")).not.toBeInTheDocument();
   });
 
+  it("renders the final completed-hand action between hands and clears it for the next hand", () => {
+    const completed = resultFixture();
+    const finalFold: PublicActionRecord = {
+      type: "ACTION",
+      playerId: "bob",
+      sequence: 6,
+      street: "RIVER",
+      requestedType: "FOLD",
+      semantic: "FOLD",
+      amountCommitted: 0,
+      toContribution: 0,
+      isAllIn: false,
+      isFullBetOrRaise: false,
+    };
+    const betweenHands = projectionFixture({
+      status: "BETWEEN_HANDS",
+      session: { ...projectionFixture().session!, completedHandCount: completed.handNumber },
+      currentHand: null,
+      seats: [null, null, null, null, null, null],
+      spectators: [],
+      recentHands: [{ ...completed, record: { ...completed.record, actions: [finalFold] } }],
+    });
+    const view = render(
+      <TableShell
+        projection={betweenHands}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        notice={null}
+        onCommand={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("上一动作")).toHaveTextContent("河牌 · Bob · 弃牌");
+
+    view.rerender(
+      <TableShell
+        projection={projectionFixture({
+          currentHand: { ...projectionFixture().currentHand!, handId: "hand-9", actions: [] },
+          recentHands: betweenHands.recentHands,
+        })}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        notice={null}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText("上一动作")).not.toBeInTheDocument();
+  });
+
   it("puts each manual host progression command in the single Action Dock", () => {
     const onCommand = vi.fn();
     const cases = [

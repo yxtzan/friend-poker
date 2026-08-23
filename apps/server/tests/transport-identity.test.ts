@@ -59,6 +59,7 @@ describe("HTTP bootstrap, cookie, and origin policy", () => {
     const initialBody = (await initial.json()) as Record<string, unknown>;
 
     expect(initial.status).toBe(200);
+    expect(initial.headers.get("cache-control")).toContain("no-store");
     expect(initialBody).toEqual({
       seats: [
         { seat: 0, occupied: false },

@@ -33,6 +33,7 @@ describe("entry availability API", () => {
     await expect(fetchEntryAvailability()).resolves.toEqual(response);
     expect(fetchMock).toHaveBeenCalledWith("/identity/entry-status", {
       method: "GET",
+      cache: "no-store",
       credentials: "same-origin",
     });
     expect(isEntryPositionAvailable(response, { kind: "SEAT", seat: 0 })).toBe(false);

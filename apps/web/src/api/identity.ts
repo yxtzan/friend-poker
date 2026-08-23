@@ -124,6 +124,7 @@ export async function fetchEntryAvailability(): Promise<EntryAvailability> {
   try {
     response = await fetch("/identity/entry-status", {
       method: "GET",
+      cache: "no-store",
       credentials: "same-origin",
     });
   } catch (error) {

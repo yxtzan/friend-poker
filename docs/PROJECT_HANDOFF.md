@@ -356,9 +356,9 @@ not technical debt to “fix” casually by persisting decks or private hole car
 Verified on the M14 implementation snapshot based on branch
 `feature/entry-action-clarity` and baseline `main@8c12d4b`:
 
-- standard suite: **430 tests** total;
+- standard suite: **435 tests** total;
 - `apps/server`: **111 tests** across 13 test files;
-- `apps/web`: **70 tests** across 12 test files;
+- `apps/web`: **75 tests** across 12 test files;
 - `packages/poker-engine`: **249 tests** across 28 test files;
 - exhaustive evaluator suite: **1 additional exhaustive test**;
 - CI migration smoke step, `npm run db:migrate:deploy --workspace @friend-poker/server`, remains

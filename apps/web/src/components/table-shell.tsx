@@ -151,7 +151,7 @@ export function TableShell({
   const reactionEggTitleRef = useRef<HTMLHeadingElement>(null);
   const reactionEggPreviousFocusRef = useRef<HTMLElement | null>(null);
   const hand = projection.currentHand;
-  const lastAction = getLastActionPresentation(projection, hand);
+  const lastAction = getLastActionPresentation(projection);
   const viewerSeat = projection.seats.find((player) => player?.playerId === viewerId)?.seat ?? null;
   const viewerIsSpectator = viewerSeat === null;
   const viewerCanSit = viewerIsSpectator && projection.status !== TableLifecycleStatus.SessionEnded;

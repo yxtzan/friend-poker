@@ -680,6 +680,7 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
         spectatorCapacity: SPECTATOR_SLOT_COUNT,
       });
     });
+    response.set("Cache-Control", "no-store");
     response.json(availability);
   });
 

@@ -1,5 +1,5 @@
 import type {
-  CurrentHandProjection,
+  PublicHandParticipant,
   PublicActionRecord,
   SafeTableProjection,
 } from "@friend-poker/shared";
@@ -20,7 +20,20 @@ const STREET_LABELS: Record<PublicActionRecord["street"], string> = {
   RIVER: "河牌",
 };
 
-function displayNameForId(projection: Pick<SafeTableProjection, "seats" | "spectators">, playerId: string): string {
+type LastActionProjection = Pick<
+  SafeTableProjection,
+  "status" | "session" | "currentHand" | "recentHands" | "seats" | "spectators"
+>;
+
+function displayNameForId(
+  projection: Pick<SafeTableProjection, "seats" | "spectators">,
+  playerId: string,
+  historicalParticipants: readonly PublicHandParticipant[] = [],
+): string {
+  const historicalParticipant = historicalParticipants.find((participant) => participant.playerId === playerId);
+  if (historicalParticipant?.nickname !== null && historicalParticipant?.nickname !== undefined) {
+    return historicalParticipant.nickname;
+  }
   const player = projection.seats
     .concat(projection.spectators)
     .find((candidate) => candidate?.playerId === playerId);
@@ -49,17 +62,15 @@ function actionLabel(action: PublicActionRecord): string {
   }
 }
 
-export function getLastActionPresentation(
-  projection: Pick<SafeTableProjection, "seats" | "spectators">,
-  hand: Pick<CurrentHandProjection, "actions"> | null,
-): LastActionPresentation | null {
-  const action = hand === null ? null : latestAction(hand.actions);
-  if (action === null) return null;
-
+function presentAction(
+  projection: LastActionProjection,
+  action: PublicActionRecord,
+  historicalParticipants: readonly PublicHandParticipant[] = [],
+): LastActionPresentation {
   return Object.freeze({
     sequence: action.sequence,
     streetLabel: STREET_LABELS[action.street],
-    nickname: displayNameForId(projection, action.playerId),
+    nickname: displayNameForId(projection, action.playerId, historicalParticipants),
     actionLabel: actionLabel(action),
     amount: action.semantic === "FOLD" || action.semantic === "CHECK"
       ? null
@@ -68,4 +79,23 @@ export function getLastActionPresentation(
         : action.amountCommitted,
     isAllIn: action.isAllIn,
   });
+}
+
+export function getLastActionPresentation(
+  projection: LastActionProjection,
+): LastActionPresentation | null {
+  if (projection.currentHand !== null) {
+    const action = latestAction(projection.currentHand.actions);
+    return action === null ? null : presentAction(projection, action);
+  }
+
+  if (projection.status !== "BETWEEN_HANDS" || projection.session === null) return null;
+  const completedHand = projection.recentHands.find(
+    (candidate) =>
+      candidate.sessionId === projection.session?.sessionId &&
+      candidate.handNumber === projection.session?.completedHandCount,
+  );
+  if (completedHand === undefined) return null;
+  const action = latestAction(completedHand.record.actions);
+  return action === null ? null : presentAction(projection, action, completedHand.record.participants);
 }
