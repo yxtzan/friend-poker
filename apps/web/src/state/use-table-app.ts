@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   CommandResult,
+  EntryAvailability,
   IdentityResponse,
   M11Command,
   PublicTableHandRecord,
@@ -11,6 +12,8 @@ import type {
 import {
   attemptIdentityRecovery,
   enterIdentity,
+  fetchEntryAvailability,
+  isEntryPositionAvailable,
   type EntryPosition,
   type IdentityEntryInput,
   IdentityApiError,
@@ -49,6 +52,8 @@ export type AppPhase =
 export interface TableAppOptions {
   readonly restoreIdentity?: () => Promise<IdentityResponse | null>;
   readonly enterIdentity?: (input: IdentityEntryInput) => Promise<IdentityResponse>;
+  readonly fetchEntryAvailability?: () => Promise<EntryAvailability>;
+  readonly entryAvailabilityPollMs?: number;
   readonly createSocket?: () => TableSocket;
   readonly commandAckTimeoutMs?: number;
 }
@@ -59,6 +64,7 @@ export interface TableAppState {
   readonly projection: SafeTableProjection | null;
   readonly nickname: string;
   readonly position: EntryPosition;
+  readonly entryAvailability: EntryAvailability | null;
   readonly canReenterAfterKick: boolean;
   readonly pendingCommand: M11Command["type"] | null;
   readonly uncertainCommand: { readonly commandId: string; readonly type: M11Command["type"] } | null;
@@ -83,6 +89,11 @@ export interface TableAppState {
 
 const SAVED_NICKNAME_KEY = "friend-poker:nickname";
 const SOUND_ENABLED_KEY = "friend-poker:sound-enabled";
+const ENTRY_AVAILABILITY_POLL_MS = 2_000;
+
+function isEntryScreenPhase(phase: AppPhase): boolean {
+  return phase === "ENTRY" || phase === "ERROR" || phase === "REVOKED" || phase === "SESSION_ENDED";
+}
 
 function savedNickname(): string {
   try {
@@ -136,12 +147,15 @@ function uncertainCommandState(
 export function useTableApp(options: TableAppOptions = {}): TableAppState {
   const restore = options.restoreIdentity ?? attemptIdentityRecovery;
   const enter = options.enterIdentity ?? enterIdentity;
+  const fetchAvailability = options.fetchEntryAvailability ?? fetchEntryAvailability;
+  const availabilityPollMs = options.entryAvailabilityPollMs ?? ENTRY_AVAILABILITY_POLL_MS;
   const createSocket = options.createSocket ?? connectToTable;
   const [phase, setPhase] = useState<AppPhase>("BOOTING");
   const [identity, setIdentity] = useState<IdentityResponse | null>(null);
   const [projection, setProjection] = useState<SafeTableProjection | null>(null);
   const [nickname, setNickname] = useState(savedNickname);
   const [position, setPosition] = useState<EntryPosition>({ kind: "SPECTATOR" });
+  const [entryAvailability, setEntryAvailability] = useState<EntryAvailability | null>(null);
   const [canReenterAfterKick, setCanReenterAfterKick] = useState(false);
   const [pendingCommand, setPendingCommand] = useState<M11Command["type"] | null>(null);
   const [uncertainCommand, setUncertainCommand] = useState<TableAppState["uncertainCommand"]>(null);
@@ -158,6 +172,8 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
   const bootSequenceRef = useRef(0);
   const restoreRef = useRef(restore);
   const enterRef = useRef(enter);
+  const fetchAvailabilityRef = useRef(fetchAvailability);
+  const availabilityPollMsRef = useRef(availabilityPollMs);
   const createSocketRef = useRef(createSocket);
   const commandAckTimeoutRef = useRef(options.commandAckTimeoutMs);
   const identityRef = useRef<IdentityResponse | null>(null);
@@ -172,6 +188,8 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
   const persistedSoundUnlockPendingRef = useRef(savedSoundEnabled());
   restoreRef.current = restore;
   enterRef.current = enter;
+  fetchAvailabilityRef.current = fetchAvailability;
+  availabilityPollMsRef.current = availabilityPollMs;
   createSocketRef.current = createSocket;
   commandAckTimeoutRef.current = options.commandAckTimeoutMs;
   soundEnabledRef.current = soundEnabled;
@@ -433,11 +451,49 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     };
   }, [boot]);
 
+  const refreshEntryAvailability = useCallback(async (): Promise<void> => {
+    try {
+      setEntryAvailability(await fetchAvailabilityRef.current());
+    } catch {
+      // Entry remains usable with the last known snapshot; POST remains authoritative.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isEntryScreenPhase(phase)) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async (): Promise<void> => {
+      try {
+        const next = await fetchAvailabilityRef.current();
+        if (active) setEntryAvailability(next);
+      } catch {
+        // Retain the last known snapshot and avoid emitting a notice for every poll failure.
+      }
+      if (active) {
+        timer = setTimeout(() => void poll(), availabilityPollMsRef.current);
+      }
+    };
+
+    void poll();
+    return () => {
+      active = false;
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [phase]);
+
   const submitEntry = useCallback(async (): Promise<void> => {
     const validationMessage = validateNicknameForEntry(nickname);
     if (validationMessage !== null) {
       setNotice(validationMessage);
       setPhase("ENTRY");
+      return;
+    }
+    if (entryAvailability !== null && !isEntryPositionAvailable(entryAvailability, position)) {
+      setNotice("所选位置刚刚变得不可用，请换一个位置");
+      setPhase("ENTRY");
+      void refreshEntryAvailability();
       return;
     }
     setNotice(null);
@@ -457,13 +513,16 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
       if (error instanceof IdentityApiError && error.code === "NICKNAME_UNAVAILABLE") {
         setCanReenterAfterKick(true);
       }
+      if (error instanceof IdentityApiError && error.code === "ENTRY_REJECTED") {
+        void refreshEntryAvailability();
+      }
       setNotice(
         error instanceof IdentityApiError
           ? identityErrorMessage(error.code, error.message)
           : "服务器暂时不可用，请稍后重试",
       );
     }
-  }, [canReenterAfterKick, connectSocket, nickname, position]);
+  }, [canReenterAfterKick, connectSocket, entryAvailability, nickname, position, refreshEntryAvailability]);
 
   const submitCommand = useCallback(async (command: M11Command): Promise<CommandResult | null> => {
     const commandClient = commandClientRef.current;
@@ -550,6 +609,7 @@ export function useTableApp(options: TableAppOptions = {}): TableAppState {
     projection,
     nickname,
     position,
+    entryAvailability,
     pendingCommand,
     uncertainCommand,
     reactions,

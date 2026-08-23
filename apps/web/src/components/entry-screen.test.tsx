@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { EntryPosition } from "@friend-poker/shared";
+import type { EntryAvailability, EntryPosition } from "@friend-poker/shared";
 import { EntryScreen } from "./entry-screen.js";
 import type { TableAppState } from "../state/use-table-app.js";
 
@@ -12,6 +12,7 @@ function appFixture(overrides: Partial<TableAppState> = {}): TableAppState {
     projection: null,
     nickname: "小明",
     position: { kind: "SPECTATOR" },
+    entryAvailability: null,
     canReenterAfterKick: false,
     pendingCommand: null,
     uncertainCommand: null,
@@ -86,5 +87,58 @@ describe("EntryScreen", () => {
     expect(setNickname).toHaveBeenCalledWith("新朋友");
     expect(setPosition).toHaveBeenCalledWith({ kind: "SEAT", seat: 2 });
     expect(submitEntry).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks occupied seats unavailable without exposing the occupant", () => {
+    const availability: EntryAvailability = {
+      seats: [
+        { seat: 0, occupied: true },
+        { seat: 1, occupied: false },
+        { seat: 2, occupied: false },
+        { seat: 3, occupied: false },
+        { seat: 4, occupied: false },
+        { seat: 5, occupied: false },
+      ],
+      spectatorCount: 1,
+      spectatorCapacity: 2,
+    };
+    render(<EntryScreen app={appFixture({ entryAvailability: availability })} />);
+
+    const occupiedSeat = screen.getByRole("button", { name: "座位 1 已有人" });
+    expect(occupiedSeat).toBeDisabled();
+    expect(occupiedSeat).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByText("已有人")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "旁观 1 / 2" })).toBeEnabled();
+    expect(screen.queryByText("小明")).not.toBeInTheDocument();
+  });
+
+  it("disables full spectator capacity and prevents a newly occupied selection from submitting", () => {
+    const availability: EntryAvailability = {
+      seats: [
+        { seat: 0, occupied: true },
+        { seat: 1, occupied: false },
+        { seat: 2, occupied: false },
+        { seat: 3, occupied: false },
+        { seat: 4, occupied: false },
+        { seat: 5, occupied: false },
+      ],
+      spectatorCount: 2,
+      spectatorCapacity: 2,
+    };
+    const submitEntry = vi.fn(async () => undefined);
+    render(
+      <EntryScreen
+        app={appFixture({
+          entryAvailability: availability,
+          position: { kind: "SEAT", seat: 0 },
+          submitEntry,
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "旁观 已满" })).toBeDisabled();
+    expect(screen.getByText("当前选择已不可用，请换一个位置。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /进入/ })).toBeDisabled();
+    expect(submitEntry).not.toHaveBeenCalled();
   });
 });

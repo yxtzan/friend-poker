@@ -51,6 +51,50 @@ describe("HTTP bootstrap, cookie, and origin policy", () => {
     }
   });
 
+  it("serves only public seat occupancy and spectator capacity without identity", async () => {
+    fixture = await createTransportFixture();
+    const initial = await fetch(`${fixture.url}/identity/entry-status`, {
+      headers: { Origin: TEST_ORIGIN },
+    });
+    const initialBody = (await initial.json()) as Record<string, unknown>;
+
+    expect(initial.status).toBe(200);
+    expect(initialBody).toEqual({
+      seats: [
+        { seat: 0, occupied: false },
+        { seat: 1, occupied: false },
+        { seat: 2, occupied: false },
+        { seat: 3, occupied: false },
+        { seat: 4, occupied: false },
+        { seat: 5, occupied: false },
+      ],
+      spectatorCount: 0,
+      spectatorCapacity: 2,
+    });
+
+    const seated = await enterIdentity(fixture, "Hidden1", { kind: "SEAT", seat: 2 });
+    await enterIdentity(fixture, "SpectatorOne", { kind: "SPECTATOR" });
+    await enterIdentity(fixture, "SpectatorTwo", { kind: "SPECTATOR" });
+    const refreshed = await fetch(`${fixture.url}/identity/entry-status`);
+    const refreshedBody = (await refreshed.json()) as Record<string, unknown>;
+    const serialized = JSON.stringify(refreshedBody);
+
+    expect(seated.status).toBe(201);
+    expect(refreshed.status).toBe(200);
+    expect(refreshedBody).toMatchObject({ spectatorCount: 2, spectatorCapacity: 2 });
+    expect((refreshedBody.seats as { seat: number; occupied: boolean }[])[2]).toEqual({
+      seat: 2,
+      occupied: true,
+    });
+    expect(serialized).not.toContain("Hidden1");
+    expect(serialized).not.toContain("playerId");
+    expect(Object.keys(refreshedBody).sort()).toEqual([
+      "seats",
+      "spectatorCapacity",
+      "spectatorCount",
+    ]);
+  });
+
   it("adds Secure in production configuration and rejects an unlisted HTTP origin", async () => {
     fixture = await createTransportFixture({ secureCookies: true });
     const entered = await enterIdentity(fixture, "Secure1", { kind: "SPECTATOR" });

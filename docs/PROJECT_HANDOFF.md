@@ -1,12 +1,12 @@
 # Friend Poker Project Handoff
 
 Canonical fast-recovery reference for the repository state after the Milestone 13
-street-reveal and hand-result presentation implementation.
+production release and the Session-ended start hotfix.
 
-- Verified main baseline before M13: `b9a216a Implement Milestone 12 product completion`
-- Last repository verification: 2026-08-21
-- M13 working branch: `feature/street-reveal-hand-result`
-- Next major phase: a new approved milestone after Draft PR review; do not infer scope here
+- Current main baseline: `8c12d4b Fix starting sessions after session end (#16)`
+- Last repository verification: 2026-08-23
+- M14 working branch: `feature/entry-action-clarity`
+- M14 scope: entry availability and live previous-action clarity; do not infer further scope here
 
 This file describes the current implementation snapshot, not an intermediate milestone or a
 chat transcript.
@@ -150,10 +150,12 @@ authenticated socket identity before invoking the runtime.
 | M11 | Fully playable game controls and host/session controls | IMPLEMENTED | Viewer-scoped legal actions, intent-only browser commands, playable betting UI, Session flow, replenishment, host controls, and acknowledgement-loss retry |
 | M12 | Product completion and acceptance | IMPLEMENTED | Hand-ranking reference, safe history/Session summaries, reactions, opt-in sound, reduced-motion polish, initial TABLE_STATE command reconciliation, responsive/accessibility QA, and deployment readiness |
 | M13 | Street reveal and hand-result presentation | IMPLEMENTED | Consecutive safe-projection community-card reveal overlay, persistent authoritative multi-pot hand result, legally scoped showdown details, and selective interaction-text-selection hardening |
+| M14 | Entry availability and live action clarity | IN PROGRESS | Narrow public entry-capacity read model, live occupied-seat/spectator presentation, and persistent authoritative previous-action context |
 
 Merged main milestones through M9 are visible in Git history from `cdf71e0` through `de44515`.
-M10 through M13 are implemented in the current snapshot. Production deployment remains
-intentionally unperformed.
+M10 through M13 are implemented in current main, including the M13 production release and
+the `SESSION_ENDED` `START_SESSION` hotfix. M14 is active only on the feature branch and has
+not been deployed.
 
 ## 5. Critical invariants
 
@@ -351,12 +353,12 @@ not technical debt to “fix” casually by persisting decks or private hole car
 
 ## 12. Current test baseline
 
-Verified on the M13 implementation snapshot based on branch
-`feature/street-reveal-hand-result` and baseline `main@b9a216a`:
+Verified on the M14 implementation snapshot based on branch
+`feature/entry-action-clarity` and baseline `main@8c12d4b`:
 
-- standard suite: **411 tests** total;
-- `apps/server`: **110 tests** across 13 test files;
-- `apps/web`: **52 tests** across 11 test files;
+- standard suite: **430 tests** total;
+- `apps/server`: **111 tests** across 13 test files;
+- `apps/web`: **70 tests** across 12 test files;
 - `packages/poker-engine`: **249 tests** across 28 test files;
 - exhaustive evaluator suite: **1 additional exhaustive test**;
 - CI migration smoke step, `npm run db:migrate:deploy --workspace @friend-poker/server`, remains
@@ -395,8 +397,8 @@ V1 intentionally has no PostgreSQL, Redis, distributed lock, or horizontal scali
 one replica would require a deliberate redesign of database concurrency, command ordering,
 Socket.IO coordination, lifecycle ownership, and deployment policy.
 
-See `docs/DEPLOYMENT_READINESS.md` for the M12 deployment checklist. The approved V1/M12
-baseline is deployed to Railway; the current M13 branch and PR #15 have not been deployed.
+See `docs/DEPLOYMENT_READINESS.md` for the M12 deployment checklist. The approved M13
+production release is deployed to Railway; the current M14 branch has not been deployed.
 
 ## 14. Deliberate non-goals
 
@@ -411,10 +413,10 @@ V1 excludes:
 - long-term analytics/rankings such as VPIP/PFR leaderboards;
 - distributed infrastructure, microservices, Redis, Kubernetes, and multi-replica operation.
 
-## 15. Known limitations after M12
+## 15. Known limitations after M13
 
-- The approved V1/M12 baseline is deployed to Railway; the current M13 branch and PR #15 have
-  not been deployed.
+- The approved M13 production release is deployed to Railway; the current M14 branch has not
+  been deployed.
 - The local acceptance environment used Node 24 despite the repository's required Node 22 range;
   deployment must use Node 22.x and CI remains the authoritative environment check.
 - Persistence is deliberately constrained to SQLite and one process/replica.
@@ -425,9 +427,9 @@ Do not list already-fixed M5–M11 review defects as current limitations.
 
 ## 16. Next phase
 
-M12 is complete. Any further work must be proposed as a new approved milestone and must not be
-inferred from this handoff. Production deployment and Draft PR/CI review remain release-process
-steps, not permission to redesign the product.
+M13 and its `SESSION_ENDED` start hotfix are complete on main. M14 is the currently approved
+milestone on `feature/entry-action-clarity`; do not infer M15 scope. Production deployment and
+Draft PR/CI review remain release-process steps, not permission to redesign the product.
 
 The client consumes safe projections and typed commands only. React must not import private
 poker-engine state, reproduce betting/settlement legality, calculate authoritative winners, or

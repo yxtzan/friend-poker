@@ -1,5 +1,6 @@
 import type { PlayerId } from "@friend-poker/poker-engine";
 import type {
+  EntryAvailability as SharedEntryAvailability,
   EntryPosition as SharedEntryPosition,
   IdentityResponse as SharedIdentityResponse,
   M11ClientCommandInput as SharedM11ClientCommandInput,
@@ -13,6 +14,7 @@ export { TransportEvent } from "@friend-poker/shared";
 export type ClientCommandInput = SharedM11ClientCommandInput;
 
 export type EntryPosition = SharedEntryPosition;
+export type EntryAvailability = SharedEntryAvailability;
 export type IdentityResponse = SharedIdentityResponse;
 export type TransportErrorResponse = SharedTransportErrorResponse;
 

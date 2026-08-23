@@ -339,6 +339,17 @@ export type EntryPosition =
   | { readonly kind: "SPECTATOR" }
   | { readonly kind: "SEAT"; readonly seat: TableSeat };
 
+export interface EntrySeatAvailability {
+  readonly seat: TableSeat;
+  readonly occupied: boolean;
+}
+
+export interface EntryAvailability {
+  readonly seats: readonly EntrySeatAvailability[];
+  readonly spectatorCount: number;
+  readonly spectatorCapacity: number;
+}
+
 export interface TransportErrorResponse {
   readonly error: string;
   readonly message: string;

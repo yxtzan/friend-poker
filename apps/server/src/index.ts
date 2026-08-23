@@ -55,6 +55,7 @@ export type {
 export type {
   ClientCommandInput,
   ClientToServerEvents,
+  EntryAvailability,
   EntryPosition,
   IdentityResponse,
   InterServerEvents,
