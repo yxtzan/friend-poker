@@ -1,6 +1,6 @@
 import type { TableSeat } from "@friend-poker/shared";
 import type { AppPhase, TableAppState } from "../state/use-table-app.js";
-import type { EntryPosition } from "../api/identity.js";
+import { isEntryPositionAvailable, type EntryPosition } from "../api/identity.js";
 
 interface EntryScreenProps {
   readonly app: TableAppState;
@@ -22,6 +22,9 @@ function connectionLabel(phase: AppPhase): string {
 export function EntryScreen({ app }: EntryScreenProps) {
   const isBusy = app.phase === "BOOTING" || app.phase === "CONNECTING";
   const selectedPosition = app.position;
+  const entryAvailability = app.entryAvailability;
+  const spectatorFull = entryAvailability !== null && entryAvailability.spectatorCount >= entryAvailability.spectatorCapacity;
+  const selectedPositionUnavailable = entryAvailability !== null && !isEntryPositionAvailable(entryAvailability, selectedPosition);
   return (
     <main className="entry-shell">
       <section className="entry-room" aria-labelledby="entry-title">
@@ -77,34 +80,44 @@ export function EntryScreen({ app }: EntryScreenProps) {
                   {([0, 1, 2, 3, 4, 5] as TableSeat[]).map((seat) => {
                     const position: EntryPosition = { kind: "SEAT", seat };
                     const selected = selectedPosition.kind === "SEAT" && selectedPosition.seat === seat;
+                    const occupied = entryAvailability?.seats.find((candidate) => candidate.seat === seat)?.occupied ?? false;
                     return (
                       <button
                         key={seat}
                         type="button"
-                        className={`position-option position-seat-${seat}${selected ? " selected" : ""}`}
+                        className={`position-option position-seat-${seat}${selected ? " selected" : ""}${occupied ? " occupied" : ""}`}
+                        aria-label={occupied ? `座位 ${seat + 1} 已有人` : `座位 ${seat + 1}`}
                         aria-pressed={selected}
-                        disabled={isBusy}
+                        aria-disabled={occupied || undefined}
+                        disabled={isBusy || occupied}
                         onClick={() => app.setPosition(position)}
                       >
                         <span className="seat-number">{seat + 1}</span>
-                        <span>座位 {seat + 1}</span>
+                        <span>{occupied ? "已有人" : `座位 ${seat + 1}`}</span>
                       </button>
                     );
                   })}
                   <button
                     type="button"
-                    className={`position-option spectator-option${selectedPosition.kind === "SPECTATOR" ? " selected" : ""}`}
+                    className={`position-option spectator-option${selectedPosition.kind === "SPECTATOR" ? " selected" : ""}${spectatorFull ? " occupied" : ""}`}
+                    aria-label={spectatorFull ? "旁观 已满" : entryAvailability === null ? "旁观" : `旁观 ${entryAvailability.spectatorCount} / ${entryAvailability.spectatorCapacity}`}
                     aria-pressed={selectedPosition.kind === "SPECTATOR"}
-                    disabled={isBusy}
+                    aria-disabled={spectatorFull || undefined}
+                    disabled={isBusy || spectatorFull}
                     onClick={() => app.setPosition({ kind: "SPECTATOR" })}
                   >
                     <span className="seat-number" aria-hidden="true">◌</span>
                     <span>旁观</span>
+                    {entryAvailability !== null && <span className="position-capacity">{spectatorFull ? "已满" : `${entryAvailability.spectatorCount} / ${entryAvailability.spectatorCapacity}`}</span>}
                   </button>
                 </div>
               </fieldset>
 
-              <button className="primary-button entry-submit" type="submit" disabled={isBusy}>
+              {selectedPositionUnavailable && (
+                <p className="entry-selection-warning" role="status">当前选择已不可用，请换一个位置。</p>
+              )}
+
+              <button className="primary-button entry-submit" type="submit" disabled={isBusy || selectedPositionUnavailable}>
                 {isBusy
                   ? "请稍候…"
                   : app.canReenterAfterKick

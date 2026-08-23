@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { CommandResult, M11Command, PublicTableHandRecord } from "@friend-poker/shared";
+import type { CommandResult, M11Command, PublicActionRecord, PublicTableHandRecord } from "@friend-poker/shared";
 import { TableShell } from "./table-shell.js";
 import { projectionFixture } from "../test/fixtures.js";
 import { STREET_REVEAL_DURATION_MS } from "../state/presentations.js";
@@ -130,6 +130,115 @@ describe("TableShell", () => {
     expect(within(board).getByLabelText("A♠")).toBeInTheDocument();
     expect(within(board).getByLabelText("K♥")).toBeInTheDocument();
     expect(within(board).getByLabelText("2♣")).toBeInTheDocument();
+  });
+
+  it("keeps the authoritative previous action beside the separate current-turn display", () => {
+    const lastRaise: PublicActionRecord = {
+      type: "ACTION",
+      playerId: "bob",
+      sequence: 2,
+      street: "PREFLOP",
+      requestedType: "RAISE",
+      semantic: "RAISE",
+      amountCommitted: 10,
+      toContribution: 12,
+      isAllIn: false,
+      isFullBetOrRaise: true,
+    };
+    const view = render(
+      <TableShell
+        projection={projectionFixture({
+          currentHand: { ...projectionFixture().currentHand!, actions: [lastRaise] },
+        })}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        notice={null}
+        onCommand={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("上一动作")).toHaveTextContent("翻牌前 · Bob · 加注至 12");
+    expect(screen.getByText("轮到 Alice")).toBeInTheDocument();
+
+    view.rerender(
+      <TableShell
+        projection={projectionFixture({
+          currentHand: { ...projectionFixture().currentHand!, street: "TURN", board: [...projectionFixture().currentHand!.board, { rank: 4, suit: "s" }], actions: [lastRaise] },
+        })}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        notice={null}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText("上一动作")).toHaveTextContent("翻牌前 · Bob · 加注至 12");
+
+    view.rerender(
+      <TableShell
+        projection={projectionFixture({
+          currentHand: { ...projectionFixture().currentHand!, handId: "hand-2", actions: [] },
+        })}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        notice={null}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText("上一动作")).not.toBeInTheDocument();
+  });
+
+  it("renders the final completed-hand action between hands and clears it for the next hand", () => {
+    const completed = resultFixture();
+    const finalFold: PublicActionRecord = {
+      type: "ACTION",
+      playerId: "bob",
+      sequence: 6,
+      street: "RIVER",
+      requestedType: "FOLD",
+      semantic: "FOLD",
+      amountCommitted: 0,
+      toContribution: 0,
+      isAllIn: false,
+      isFullBetOrRaise: false,
+    };
+    const betweenHands = projectionFixture({
+      status: "BETWEEN_HANDS",
+      session: { ...projectionFixture().session!, completedHandCount: completed.handNumber },
+      currentHand: null,
+      seats: [null, null, null, null, null, null],
+      spectators: [],
+      recentHands: [{ ...completed, record: { ...completed.record, actions: [finalFold] } }],
+    });
+    const view = render(
+      <TableShell
+        projection={betweenHands}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        notice={null}
+        onCommand={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("上一动作")).toHaveTextContent("河牌 · Bob · 弃牌");
+
+    view.rerender(
+      <TableShell
+        projection={projectionFixture({
+          currentHand: { ...projectionFixture().currentHand!, handId: "hand-9", actions: [] },
+          recentHands: betweenHands.recentHands,
+        })}
+        viewerId="alice"
+        phase="CONNECTED"
+        pendingCommand={null}
+        notice={null}
+        onCommand={vi.fn()}
+      />,
+    );
+    expect(screen.queryByLabelText("上一动作")).not.toBeInTheDocument();
   });
 
   it("puts each manual host progression command in the single Action Dock", () => {

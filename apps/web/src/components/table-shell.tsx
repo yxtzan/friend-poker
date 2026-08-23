@@ -23,6 +23,7 @@ import {
   calculatePotQuickTarget,
   type PotQuickSize,
 } from "../state/bet-sizing.js";
+import { getLastActionPresentation } from "../state/last-action.js";
 import { STREET_REVEAL_DURATION_MS, type StreetRevealPresentation } from "../state/presentations.js";
 
 interface TableShellProps {
@@ -150,6 +151,7 @@ export function TableShell({
   const reactionEggTitleRef = useRef<HTMLHeadingElement>(null);
   const reactionEggPreviousFocusRef = useRef<HTMLElement | null>(null);
   const hand = projection.currentHand;
+  const lastAction = getLastActionPresentation(projection);
   const viewerSeat = projection.seats.find((player) => player?.playerId === viewerId)?.seat ?? null;
   const viewerIsSpectator = viewerSeat === null;
   const viewerCanSit = viewerIsSpectator && projection.status !== TableLifecycleStatus.SessionEnded;
@@ -254,6 +256,16 @@ export function TableShell({
               ))}
             </div>
             <div className="pot-display"><span>当前底池</span><strong>{hand?.potSize ?? 0}</strong></div>
+            {lastAction !== null && (
+              <div className="last-action" aria-label="上一动作" aria-live="polite" data-sequence={lastAction.sequence}>
+                <span className="last-action-label">上一动作</span>
+                <span className="last-action-copy">
+                  {lastAction.streetLabel} · {lastAction.nickname} · {lastAction.actionLabel}
+                  {lastAction.amount === null ? "" : ` ${lastAction.amount}`}
+                  {lastAction.isAllIn ? " · All-in" : ""}
+                </span>
+              </div>
+            )}
             {hand !== null && (
               <div className="turn-display" aria-live="polite">
                 {hand.currentActorId === null ? handStatusLabel(hand.status) : `轮到 ${displayNameForId(projection, hand.currentActorId)}`}

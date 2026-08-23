@@ -10,7 +10,7 @@ import type { NextFunction, Request, Response } from "express";
 import { Server as SocketIOServer } from "socket.io";
 import type { Socket } from "socket.io";
 
-import { TableLifecycleStatus } from "@friend-poker/poker-engine";
+import { SPECTATOR_SLOT_COUNT, TableLifecycleStatus } from "@friend-poker/poker-engine";
 import type { PlayerId, RandomSource, TableSeat } from "@friend-poker/poker-engine";
 import { REACTION_EMOJIS } from "@friend-poker/shared";
 import {
@@ -47,6 +47,7 @@ import { TransportEvent } from "./types.js";
 import type {
   ClientCommandInput,
   ClientToServerEvents,
+  EntryAvailability,
   EntryPosition,
   IdentityResponse,
   InterServerEvents,
@@ -664,6 +665,23 @@ export function createPokerServer(options: PokerServerOptions = {}): PokerServer
     response.status(persistenceHealthy ? 200 : 503).json({
       status: persistenceHealthy ? "ok" : "unavailable",
     });
+  });
+
+  app.get("/identity/entry-status", async (_request, response) => {
+    const availability = await enqueueAuthoritative(async (): Promise<EntryAvailability> => {
+      const projection = runtime.getProjection({ kind: "SPECTATOR" });
+      return Object.freeze({
+        seats: Object.freeze(
+          projection.seats.map((player, seat) =>
+            Object.freeze({ seat: seat as TableSeat, occupied: player !== null }),
+          ),
+        ),
+        spectatorCount: projection.spectators.length,
+        spectatorCapacity: SPECTATOR_SLOT_COUNT,
+      });
+    });
+    response.set("Cache-Control", "no-store");
+    response.json(availability);
   });
 
   async function handleIdentityEnter(request: Request, response: Response): Promise<void> {

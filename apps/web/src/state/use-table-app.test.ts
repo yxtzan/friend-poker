@@ -2,12 +2,14 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   CommandResult,
+  EntryAvailability,
   IdentityResponse,
   M10ClientCommandInput,
   PublicTableHandRecord,
 } from "@friend-poker/shared";
 import { TransportEvent } from "@friend-poker/shared";
 import type { TableSocket } from "../api/socket.js";
+import { IdentityApiError } from "../api/identity.js";
 import { projectionFixture } from "../test/fixtures.js";
 import { useTableApp } from "./use-table-app.js";
 
@@ -68,6 +70,19 @@ class FakeSocket {
 
 const identity: IdentityResponse = { status: "RESTORED", playerId: "alice", nickname: "Alice" };
 
+const freeEntryAvailability: EntryAvailability = {
+  seats: [
+    { seat: 0, occupied: false },
+    { seat: 1, occupied: false },
+    { seat: 2, occupied: false },
+    { seat: 3, occupied: false },
+    { seat: 4, occupied: false },
+    { seat: 5, occupied: false },
+  ],
+  spectatorCount: 0,
+  spectatorCapacity: 2,
+};
+
 function completedHandFixture(): PublicTableHandRecord {
   return {
     sessionId: "session-1",
@@ -118,6 +133,103 @@ describe("useTableApp", () => {
 
     await waitFor(() => expect(result.current.phase).toBe("ENTRY"));
     expect(restoreIdentity).toHaveBeenCalledTimes(1);
+  });
+
+  it("polls entry availability immediately, retains the last snapshot after a temporary failure, and refreshes again", async () => {
+    vi.useFakeTimers();
+    const nextAvailability: EntryAvailability = {
+      ...freeEntryAvailability,
+      seats: freeEntryAvailability.seats.map((seat) =>
+        seat.seat === 3 ? { ...seat, occupied: true } : seat,
+      ),
+    };
+    const fetchAvailability = vi.fn()
+      .mockResolvedValueOnce(freeEntryAvailability)
+      .mockRejectedValueOnce(new Error("temporary"))
+      .mockResolvedValueOnce(nextAvailability);
+    const { result, unmount } = renderHook(() =>
+      useTableApp({
+        restoreIdentity: async () => null,
+        fetchEntryAvailability: fetchAvailability,
+        entryAvailabilityPollMs: 2_000,
+      }),
+    );
+
+    try {
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(result.current.phase).toBe("ENTRY");
+      expect(fetchAvailability).toHaveBeenCalledTimes(1);
+      expect(result.current.entryAvailability).toBe(freeEntryAvailability);
+
+      await act(async () => {
+        vi.advanceTimersByTime(2_000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(fetchAvailability).toHaveBeenCalledTimes(2);
+      expect(result.current.entryAvailability).toBe(freeEntryAvailability);
+
+      await act(async () => {
+        vi.advanceTimersByTime(2_000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(fetchAvailability).toHaveBeenCalledTimes(3);
+      expect(result.current.entryAvailability).toBe(nextAvailability);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("refreshes after an authoritative entry race rejection and blocks a known-occupied selection", async () => {
+    const occupied = {
+      ...freeEntryAvailability,
+      seats: freeEntryAvailability.seats.map((seat) =>
+        seat.seat === 1 ? { ...seat, occupied: true } : seat,
+      ),
+    } satisfies EntryAvailability;
+    const fetchAvailability = vi.fn()
+      .mockResolvedValueOnce(freeEntryAvailability)
+      .mockResolvedValueOnce(occupied);
+    const enterIdentity = vi.fn(async () => {
+      throw new IdentityApiError(409, {
+        error: "ENTRY_REJECTED",
+        message: "所选位置当前不可用，请换一个位置",
+      });
+    });
+    const { result, unmount } = renderHook(() =>
+      useTableApp({
+        restoreIdentity: async () => null,
+        enterIdentity,
+        fetchEntryAvailability: fetchAvailability,
+        entryAvailabilityPollMs: 60_000,
+      }),
+    );
+
+    try {
+      await waitFor(() => expect(result.current.entryAvailability).toBe(freeEntryAvailability));
+      act(() => result.current.setNickname("Alice"));
+      act(() => result.current.setPosition({ kind: "SEAT", seat: 1 }));
+      await act(async () => {
+        await result.current.submitEntry();
+      });
+
+      expect(enterIdentity).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(result.current.entryAvailability).toBe(occupied));
+      expect(result.current.phase).toBe("ENTRY");
+
+      await act(async () => {
+        await result.current.submitEntry();
+      });
+      expect(enterIdentity).toHaveBeenCalledTimes(1);
+      expect(result.current.notice).toBe("所选位置刚刚变得不可用，请换一个位置");
+    } finally {
+      unmount();
+    }
   });
 
   it("replaces projection on Socket.IO sync and handles revoked state", async () => {
